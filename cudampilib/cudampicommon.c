@@ -52,7 +52,7 @@ cudaError_t __cudampi__getCpuFreeThreads(int* count)
 {
   int gpuCount = 0;
   cudaError_t status = cudaGetDeviceCount(&gpuCount);
-  *count = omp_get_max_threads() - gpuCount;
+  *count = omp_get_max_threads() - (gpuCount * 2);
   return status;
 }
 

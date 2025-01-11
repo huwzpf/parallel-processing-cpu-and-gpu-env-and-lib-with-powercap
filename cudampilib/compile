@@ -20,31 +20,31 @@ nvcc -c $APPS_DIR/$VECMAXDIV_DIR/appkernelvecmaxdiv.cu -o $BUILD_DIR/appkernelve
 nvcc -c $APPS_DIR/$VECADD_DIR/appkernelvecadd.cu -o $BUILD_DIR/appkernelvecadd.o -Iinclude
 nvcc -c $APPS_DIR/$COLLATZ_DIR/appkernelcollatz.cu -o $BUILD_DIR/appkernelcollatz.o -Iinclude
 nvcc -c $APPS_DIR/$PATTERNSEARCH_DIR/appkernelpatternsearch.cu -o $BUILD_DIR/appkernelpatternsearch.o -Iinclude
-nvcc -c $APPS_DIR/$RNN_DIR/appkernelrnn.cu -o $BUILD_DIR/appkernelrnn.o -Iinclude -lcublas
 nvcc -c $APPS_DIR/$TWINPRIME_DIR/appkerneltwinprime.cu -o $BUILD_DIR/appkerneltwinprime.o -Iinclude
+# nvcc -c $APPS_DIR/$RNN_DIR/appkernelrnn.cu -o $BUILD_DIR/appkernelrnn.o -Iinclude -lcublas
 
 
 mpicc -fopenmp -c $APPS_DIR/$COLLATZ_DIR/cpukernelcollatz.c -Iinclude -o $BUILD_DIR/cpukernelcollatz.o
 mpicc -fopenmp -c $APPS_DIR/$VECADD_DIR/cpukernelvecadd.c -Iinclude -o $BUILD_DIR/cpukernelvecadd.o
 mpicc -fopenmp -c $APPS_DIR/$VECMAXDIV_DIR/cpukernelvecmaxdiv.c -Iinclude -o $BUILD_DIR/cpukernelvecmaxdiv.o -lm
 mpicc -fopenmp -c $APPS_DIR/$PATTERNSEARCH_DIR/cpukernelpatternsearch.c -Iinclude -o $BUILD_DIR/cpukernelpatternsearch.o
-mpicc -fopenmp -c $APPS_DIR/$RNN_DIR/cpukernelrnn.c  -Iinclude -I/opt/intel/oneapi/mkl/latest/include -L/opt/intel/oneapi/mkl/latest/lib/intel64  -lmkl_intel_lp64 -lmkl_gnu_thread -lmkl_core   -lpthread -lm -ldl -o $BUILD_DIR/cpukernelrnn.o 
 mpicc -fopenmp -c $APPS_DIR/$TWINPRIME_DIR/cpukerneltwinprime.c  -Iinclude -lpthread -lm -o $BUILD_DIR/cpukerneltwinprime.o 
+# mpicc -fopenmp -c $APPS_DIR/$RNN_DIR/cpukernelrnn.c  -Iinclude -I/opt/intel/oneapi/mkl/latest/include -L/opt/intel/oneapi/mkl/latest/lib/intel64  -lmkl_intel_lp64 -lmkl_gnu_thread -lmkl_core   -lpthread -lm -ldl -o $BUILD_DIR/cpukernelrnn.o 
 
 #mpicc -fopenmp -o $BUILD_DIR/cudampislave cudampislave.c $BUILD_DIR/appkernel.o $BUILD_DIR/cudampicommon.o -I/usr/local/cuda/include -Iinclude -L/usr/local/cuda/lib64 -lcudart -lstdc++
 mpicc -fopenmp -o $BUILD_DIR/cudampislave-vecmaxdiv cudampislave.c $BUILD_DIR/cpukernelvecmaxdiv.o $BUILD_DIR/appkernelvecmaxdiv.o $BUILD_DIR/cudampicommon.o -I/usr/local/cuda/include -Iinclude -L/usr/local/cuda/lib64 -lcudart -lstdc++ -lm -lnvidia-ml
 mpicc -fopenmp -o $BUILD_DIR/cudampislave-vecadd cudampislave.c $BUILD_DIR/cpukernelvecadd.o $BUILD_DIR/appkernelvecadd.o $BUILD_DIR/cudampicommon.o -I/usr/local/cuda/include -Iinclude -L/usr/local/cuda/lib64 -lcudart -lstdc++ -lm -lnvidia-ml
 mpicc -fopenmp -o $BUILD_DIR/cudampislave-collatz cudampislave.c $BUILD_DIR/cpukernelcollatz.o $BUILD_DIR/appkernelcollatz.o $BUILD_DIR/cudampicommon.o -I/usr/local/cuda/include -Iinclude -L/usr/local/cuda/lib64 -lcudart -lstdc++ -lm -lnvidia-ml
 mpicc -fopenmp -o $BUILD_DIR/cudampislave-patternsearch cudampislave.c $BUILD_DIR/cpukernelpatternsearch.o $BUILD_DIR/appkernelpatternsearch.o $BUILD_DIR/cudampicommon.o -I/usr/local/cuda/include -Iinclude -L/usr/local/cuda/lib64 -lcudart -lstdc++ -lm -lnvidia-ml
-mpicc -fopenmp -o $BUILD_DIR/cudampislave-rnn cudampislave.c $BUILD_DIR/cpukernelrnn.o $BUILD_DIR/appkernelrnn.o $BUILD_DIR/cudampicommon.o -I/usr/local/cuda/include -Iinclude -L/usr/local/cuda/lib64 -lcudart   -lstdc++ -lm -lnvidia-ml -lcublas  -Iinclude -I/opt/intel/oneapi/mkl/latest/include -L/opt/intel/oneapi/mkl/latest/lib/intel64  -lmkl_intel_lp64 -lmkl_gnu_thread -lmkl_core -lpthread -lm -ldl 
 mpicc -fopenmp -o $BUILD_DIR/cudampislave-twinprime cudampislave.c $BUILD_DIR/cpukerneltwinprime.o $BUILD_DIR/appkerneltwinprime.o $BUILD_DIR/cudampicommon.o -I/usr/local/cuda/include -Iinclude -L/usr/local/cuda/lib64 -lcudart -lstdc++ -lm -lnvidia-ml
+# mpicc -fopenmp -o $BUILD_DIR/cudampislave-rnn cudampislave.c $BUILD_DIR/cpukernelrnn.o $BUILD_DIR/appkernelrnn.o $BUILD_DIR/cudampicommon.o -I/usr/local/cuda/include -Iinclude -L/usr/local/cuda/lib64 -lcudart   -lstdc++ -lm -lnvidia-ml -lcublas  -Iinclude -I/opt/intel/oneapi/mkl/latest/include -L/opt/intel/oneapi/mkl/latest/lib/intel64  -lmkl_intel_lp64 -lmkl_gnu_thread -lmkl_core -lpthread -lm -ldl 
 
 #mpicc -fopenmp -o $BUILD_DIR/app $APPS_DIR/$APP_DIR/app.c $BUILD_DIR/appkernel.o $BUILD_DIR/cudampilib.o $BUILD_DIR/cudampicommon.o -I/usr/local/cuda/include -Iinclude -L/usr/local/cuda/lib64 -lcudart -lstdc++
 mpicc -fopenmp -o $BUILD_DIR/app-streams-vecmaxdiv $APPS_DIR/$VECMAXDIV_DIR/app-streams-vecmaxdiv.c $BUILD_DIR/cpukernelvecmaxdiv.o $BUILD_DIR/appkernelvecmaxdiv.o $BUILD_DIR/cudampilib.o $BUILD_DIR/cudampicommon.o -I/usr/local/cuda/include -Iinclude -L/usr/local/cuda/lib64 -lcudart -lstdc++ -lm -lnvidia-ml
 mpicc -fopenmp -o $BUILD_DIR/app-streams-vecadd $APPS_DIR/$VECADD_DIR/app-streams-vecadd.c $BUILD_DIR/cpukernelvecadd.o $BUILD_DIR/appkernelvecadd.o $BUILD_DIR/cudampilib.o $BUILD_DIR/cudampicommon.o -I/usr/local/cuda/include -Iinclude -L/usr/local/cuda/lib64 -lcudart -lstdc++ -lm -lnvidia-ml
 mpicc -fopenmp -o $BUILD_DIR/app-streams-collatz $APPS_DIR/$COLLATZ_DIR/app-streams-collatz.c $BUILD_DIR/cpukernelcollatz.o $BUILD_DIR/appkernelcollatz.o $BUILD_DIR/cudampilib.o $BUILD_DIR/cudampicommon.o -I/usr/local/cuda/include -Iinclude -L/usr/local/cuda/lib64 -lcudart -lstdc++ -lm -lnvidia-ml
 mpicc -fopenmp -o $BUILD_DIR/app-streams-patternsearch $APPS_DIR/$PATTERNSEARCH_DIR/app-streams-patternsearch.c $BUILD_DIR/cpukernelpatternsearch.o $BUILD_DIR/appkernelpatternsearch.o $BUILD_DIR/cudampilib.o $BUILD_DIR/cudampicommon.o -I/usr/local/cuda/include -Iinclude -L/usr/local/cuda/lib64 -lcudart -lstdc++ -lm -lnvidia-ml
-mpicc -fopenmp -o $BUILD_DIR/app-streams-rnn $APPS_DIR/$RNN_DIR/app-streams-rnn.c $BUILD_DIR/cpukernelrnn.o $BUILD_DIR/appkernelrnn.o $BUILD_DIR/cudampilib.o $BUILD_DIR/cudampicommon.o -I/usr/local/cuda/include   -Iinclude -L/usr/local/cuda/lib64 -lcudart -lstdc++ -lm -lnvidia-ml -lcublas  -Iinclude -I/opt/intel/oneapi/mkl/latest/include -L/opt/intel/oneapi/mkl/latest/lib/intel64  -lmkl_intel_lp64 -lmkl_gnu_thread -lmkl_core -lpthread -lm -ldl
 mpicc -fopenmp -o $BUILD_DIR/app-streams-twinprime $APPS_DIR/$TWINPRIME_DIR/app-streams-twinprime.c $BUILD_DIR/cpukerneltwinprime.o $BUILD_DIR/appkerneltwinprime.o $BUILD_DIR/cudampilib.o $BUILD_DIR/cudampicommon.o -I/usr/local/cuda/include -Iinclude -L/usr/local/cuda/lib64 -lcudart -lstdc++ -lm -lnvidia-ml
+# mpicc -fopenmp -o $BUILD_DIR/app-streams-rnn $APPS_DIR/$RNN_DIR/app-streams-rnn.c $BUILD_DIR/cpukernelrnn.o $BUILD_DIR/appkernelrnn.o $BUILD_DIR/cudampilib.o $BUILD_DIR/cudampicommon.o -I/usr/local/cuda/include   -Iinclude -L/usr/local/cuda/lib64 -lcudart -lstdc++ -lm -lnvidia-ml -lcublas  -Iinclude -I/opt/intel/oneapi/mkl/latest/include -L/opt/intel/oneapi/mkl/latest/lib/intel64  -lmkl_intel_lp64 -lmkl_gnu_thread -lmkl_core -lpthread -lm -ldl
 
 echo "Build complete. Executables and object files are in '$BUILD_DIR'."

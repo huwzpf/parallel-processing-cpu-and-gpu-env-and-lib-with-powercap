@@ -19,7 +19,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OU
 #include "cudampicommon.h"
 
 // number of stream dedicated for sending GPU responses to master
-#define CPU_STREAM_FOR_GPU_RESPONSES CPU_STREAMS_SUPPORTED
+#define CPU_STREAM_FOR_GPU_RESPONSES CPU_STREAMS_SUPPORTED + omp_get_thread_num()
 // 4 GB per GPU seems reasonable
 #define INITIAL_GPU_BUFFER_SIZE 4 * 1024 * 1024 * 1024UL
 
@@ -367,7 +367,7 @@ void scheduleCpuTask(task_queue_entry_t* current_task_queue_entry, unsigned long
   // because GPU is faster meaning there will be more GPU-related communication
   // which increases importance of these request being services fast 
   int priority = 0;
-  if (stream == CPU_STREAM_FOR_GPU_RESPONSES) {
+  if (stream > CPU_STREAMS_SUPPORTED) {
     priority = 100;
   }
 
@@ -579,7 +579,7 @@ int main(int argc, char **argv) {
   if (CPU_STREAMS_SUPPORTED < 1 || CPU_STREAMS_SUPPORTED > 2) {
     log_message(LOG_ERROR, "It is only possible to launch 1 or 2 CPU streams. Currently attempted: %d", CPU_STREAMS_SUPPORTED);
   }
-  numberOfThreads += ALL_CPU_STREAMS;
+  numberOfThreads += ALL_CPU_STREAMS - (MAX_GPU_PER_NODE - __cudampi__localGpuDeviceCount);
 
   // If CPU disabled, terminate task handling threads
   if(numberOfCpuThreads == 0) {
