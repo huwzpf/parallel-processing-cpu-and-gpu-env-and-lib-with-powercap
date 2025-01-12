@@ -674,7 +674,7 @@ int main(int argc, char **argv) {
               cpuEnergyMeasured = -1.0;
             }
             else {
-              cpuEnergyMeasured *= (1 - __cudampi__cpu_power_scaling);
+              cpuEnergyMeasured *= ((1 - __cudampi__cpu_power_scaling) / __cudampi__localGpuDeviceCount);
             }
             gpuPowerMeasured = getGPUpower(device);
           }

@@ -1058,6 +1058,7 @@ cudaError_t __cudampi__deviceSynchronize(void) {
     if (__cudampi__isglobalpowerlimitset) {
       cudaError_t error = cudaErrorUnknown;
       error = getCpuEnergyUsed(&cpuLastEnergyMeasured[omp_get_thread_num()], &energy);
+      energy /= __cudampi__localGpuDeviceCount;
       if (error != cudaSuccess) {
         energy = -1;
       }
