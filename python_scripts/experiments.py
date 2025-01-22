@@ -1,6 +1,7 @@
 import os
 import subprocess
 import sys
+import time
 
 from pathlib import Path
 
@@ -22,14 +23,22 @@ def single_app_run(run_parameters: RunParameters) -> SingleRunResult:
     command = f"./run_scripts/run-app {run_parameters.app_name} B {run_parameters.number_od_nodes} {arguments}"
     print(command)
     try:
-        result = subprocess.run(command.split(" "), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
-    except subprocess.CalledProcessError as e:
+        result = subprocess.run(command.split(" "), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True, timeout=5000)
+    except Exception as e:
+        result = None
         print(f"An error occurred while executing the command: {e}")
-        print("Error Output:\n", e.output)
-        sys.exit()
-    if "Main elapsed time" not in result.stderr:
+
+    if (result is None) or ("No devices found under the power limit" in result.stderr) or ("Main elapsed time" not in result.stderr):
         print("Error encountered when launching application")
-        print(result.stderr)
+        try:
+            time.sleep(10)
+            result = subprocess.run(command.split(" "), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True, timeout=5000)
+        except Exception as e:
+            result = None
+            print(f"An error occurred while executing the command: {e}")
+    
+    if "No devices found under the power limit" in result.stderr:
+        return -1
 
     return SingleRunResult.from_output(stdout=result.stdout, stderr=result.stderr)
 
