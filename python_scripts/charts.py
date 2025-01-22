@@ -4,17 +4,26 @@ import pandas as pd
 from models import ExperimentResult
 import numpy as np
 
+
+MARKER_SIZE = 3
+CAPSIZE = 3     # length of horizontal line of std deviation
+CAPTHICK = 1    # thickness of horizontal line of std deviation
+ELINEWIDTH = 1  # thickness of vertical line of std deviation
+
+
 def time_powercap_scatter(experiment_result: ExperimentResult):
     # Extracting data
     power_cpu_gpu = [multiple_run_result.parameters.powercap for multiple_run_result in experiment_result.experiment_result if multiple_run_result.parameters.cpu_enabled]
     execution_duration_cpu_gpu_avg = [multiple_run_result.average("execution_duration") for multiple_run_result in experiment_result.experiment_result if multiple_run_result.parameters.cpu_enabled]
-    execution_duration_cpu_gpu_min = [multiple_run_result.min("execution_duration") for multiple_run_result in experiment_result.experiment_result if multiple_run_result.parameters.cpu_enabled]
-    execution_duration_cpu_gpu_max = [multiple_run_result.max("execution_duration") for multiple_run_result in experiment_result.experiment_result if multiple_run_result.parameters.cpu_enabled]
+    std_deviation_cpu_gpu = [multiple_run_result.standard_deviation("execution_duration") for multiple_run_result in experiment_result.experiment_result if multiple_run_result.parameters.cpu_enabled]
+    # execution_duration_cpu_gpu_min = [multiple_run_result.min("execution_duration") for multiple_run_result in experiment_result.experiment_result if multiple_run_result.parameters.cpu_enabled]
+    # execution_duration_cpu_gpu_max = [multiple_run_result.max("execution_duration") for multiple_run_result in experiment_result.experiment_result if multiple_run_result.parameters.cpu_enabled]
 
     power_gpu = [multiple_run_result.parameters.powercap for multiple_run_result in experiment_result.experiment_result if not multiple_run_result.parameters.cpu_enabled]
     execution_duration_gpu_avg = [multiple_run_result.average("execution_duration") for multiple_run_result in experiment_result.experiment_result if not multiple_run_result.parameters.cpu_enabled]
-    execution_duration_gpu_min = [multiple_run_result.min("execution_duration") for multiple_run_result in experiment_result.experiment_result if not multiple_run_result.parameters.cpu_enabled]
-    execution_duration_gpu_max = [multiple_run_result.max("execution_duration") for multiple_run_result in experiment_result.experiment_result if not multiple_run_result.parameters.cpu_enabled]
+    std_deviation_gpu = [multiple_run_result.standard_deviation("execution_duration") for multiple_run_result in experiment_result.experiment_result if not multiple_run_result.parameters.cpu_enabled]
+    # execution_duration_gpu_min = [multiple_run_result.min("execution_duration") for multiple_run_result in experiment_result.experiment_result if not multiple_run_result.parameters.cpu_enabled]
+    # execution_duration_gpu_max = [multiple_run_result.max("execution_duration") for multiple_run_result in experiment_result.experiment_result if not multiple_run_result.parameters.cpu_enabled]
 
     # Compute differences for the line plot
     execution_duration_diff = [gpu / cpu for cpu, gpu in zip(execution_duration_cpu_gpu_avg, execution_duration_gpu_avg)]
@@ -23,13 +32,13 @@ def time_powercap_scatter(experiment_result: ExperimentResult):
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 8), sharex=True, gridspec_kw={'height_ratios': [3, 1]})
 
     # --- Scatter and Line Plot (Main Plot) ---
-    ax1.plot(power_cpu_gpu, execution_duration_cpu_gpu_avg, label="CPU+GPU avg", marker='^', color='blue')
-    ax1.scatter(power_cpu_gpu, execution_duration_cpu_gpu_min, label="CPU+GPU min", marker='^', color='red')
-    ax1.scatter(power_cpu_gpu, execution_duration_cpu_gpu_max, label="CPU+GPU max", marker='^', color='orange')
+    ax1.errorbar(power_cpu_gpu, execution_duration_cpu_gpu_avg, label="CPU+GPU avg", marker='^', color='blue', yerr=std_deviation_cpu_gpu, capsize=CAPSIZE, capthick=CAPTHICK, markersize=MARKER_SIZE, elinewidth=ELINEWIDTH)
+    # ax1.scatter(power_cpu_gpu, execution_duration_cpu_gpu_min, label="CPU+GPU min", marker='^', color='red')
+    # ax1.scatter(power_cpu_gpu, execution_duration_cpu_gpu_max, label="CPU+GPU max", marker='^', color='orange')
 
-    ax1.plot(power_gpu, execution_duration_gpu_avg, label="GPU avg", marker='o', color='green')
-    ax1.scatter(power_gpu, execution_duration_gpu_min, label="GPU min", marker='o', color='purple')
-    ax1.scatter(power_gpu, execution_duration_gpu_max, label="GPU max", marker='o', color='brown')
+    ax1.errorbar(power_gpu, execution_duration_gpu_avg, label="GPU avg", marker='o', color='green', yerr=std_deviation_gpu, capsize=CAPSIZE, capthick=CAPTHICK, markersize=MARKER_SIZE, elinewidth=ELINEWIDTH)
+    # ax1.scatter(power_gpu, execution_duration_gpu_min, label="GPU min", marker='o', color='purple')
+    # ax1.scatter(power_gpu, execution_duration_gpu_max, label="GPU max", marker='o', color='brown')
 
     ax1.set_ylabel("Execution Duration [s]", fontsize=16)  # Increased font size
     ax1.legend(fontsize=16, ncol=2)  # Increased legend font size
@@ -57,13 +66,15 @@ def time_powercap_scatter(experiment_result: ExperimentResult):
 def time_batch_size_scatter(experiment_result: ExperimentResult):
     batch_size_cpu_gpu = [multiple_run_result.parameters.batch_size for multiple_run_result in experiment_result.experiment_result if multiple_run_result.parameters.cpu_enabled]
     execution_duration_cpu_gpu = [multiple_run_result.average("execution_duration") for multiple_run_result in experiment_result.experiment_result if multiple_run_result.parameters.cpu_enabled]
-    
+    std_deviation_cpu_gpu = [multiple_run_result.standard_deviation("execution_duration") for multiple_run_result in experiment_result.experiment_result if multiple_run_result.parameters.cpu_enabled]
+
     batch_size_gpu = [multiple_run_result.parameters.batch_size for multiple_run_result in experiment_result.experiment_result if not multiple_run_result.parameters.cpu_enabled]
     execution_duration_gpu = [multiple_run_result.average("execution_duration") for multiple_run_result in experiment_result.experiment_result if not multiple_run_result.parameters.cpu_enabled]
-    
+    std_deviation_gpu = [multiple_run_result.standard_deviation("execution_duration") for multiple_run_result in experiment_result.experiment_result if not multiple_run_result.parameters.cpu_enabled]
+
     plt.figure()
-    plt.plot(batch_size_cpu_gpu, execution_duration_cpu_gpu, label="CPU+GPU", marker='o')
-    plt.plot(batch_size_gpu, execution_duration_gpu, label="GPU", marker='o')
+    plt.errorbar(batch_size_cpu_gpu, execution_duration_cpu_gpu, yerr=std_deviation_cpu_gpu, label="CPU+GPU", capsize=CAPSIZE, capthick=CAPTHICK, marker='o', markersize=MARKER_SIZE, elinewidth=ELINEWIDTH)
+    plt.errorbar(batch_size_gpu, execution_duration_gpu, yerr=std_deviation_gpu, label="GPU", capsize=CAPSIZE, capthick=CAPTHICK, marker='o', markersize=MARKER_SIZE, elinewidth=ELINEWIDTH)
     
     plt.xscale('log')
     plt.xlabel("Batch Size", fontsize=16)
@@ -86,6 +97,7 @@ def time_batch_size_scatter(experiment_result: ExperimentResult):
     # Save figure
     plt.savefig(f'{experiment_result.experiment_result[0].parameters.app_name}_time_batch_size_nodes_{experiment_result.experiment_result[0].parameters.number_od_nodes}.png')
     plt.close()
+
 
 def time_number_of_nodes_bar(experiment_result: ExperimentResult):
     number_of_nodes = [multiple_run_result.parameters.number_od_nodes for multiple_run_result in experiment_result.experiment_result]
