@@ -104,17 +104,26 @@ def time_number_of_nodes_bar(experiment_result: ExperimentResult):
     # "CPU+GPU one stream", "CPU+GPU two streams", "GPU one stream", "GPU two streams"
     configuration = [f'{"CPU+" if multiple_run_result.parameters.cpu_enabled else ""}GPU {"one stream" if multiple_run_result.parameters.number_of_streams == 1 else "two streams"}' for multiple_run_result in experiment_result.experiment_result]
     execution_duration = [multiple_run_result.average("execution_duration") for multiple_run_result in experiment_result.experiment_result]
+    std_deviation = [multiple_run_result.standard_deviation("execution_duration") for multiple_run_result in experiment_result.experiment_result]
 
     data = {
-        'number of nodes': number_of_nodes,
+        'Number of Nodes': number_of_nodes,
         'Configuration': configuration,
-        'Time (s)': execution_duration
+        'Time (s)': execution_duration,
+        'Std Deviation': std_deviation,
     }
 
     df = pd.DataFrame(data)
     # pivot the data so that each "Number of nodes" has its own column for each configuration
-    df_pivot = df.pivot(index='number of nodes', columns='Configuration', values='Time (s)')
-    df_pivot.plot(kind='bar', width=0.8, figsize=(10, 6))
+    df_pivot = df.pivot(index='Number of Nodes', columns='Configuration', values='Time (s)')
+    std_pivot = df.pivot(index='Number of Nodes', columns='Configuration', values='Std Deviation')
+
+    df_pivot.plot.bar(
+        width=0.8,
+        figsize=(10, 6),
+        yerr=std_pivot,
+        capsize=CAPSIZE
+    )
     plt.xlabel('Number of nodes', fontsize=18)
     plt.ylabel('Time [s]', fontsize=18)
     plt.xticks(fontsize=16)
