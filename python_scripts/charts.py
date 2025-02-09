@@ -48,7 +48,7 @@ def time_powercap_scatter(experiment_result: ExperimentResult):
 
     # --- Line Plot for Execution Time Difference ---
     ax2.plot(power_cpu_gpu, execution_duration_diff, label="CPU+GPU speedup vs GPU", marker='s', linestyle='-', color='black')
-
+    print(f'Avg speedup for {experiment_result.experiment_result[0].parameters.app_name} : {np.mean(execution_duration_diff)}')
     ax2.axhline(1, color='black', linewidth=0.8, linestyle="--")  # Reference line at y=0
     ax2.set_ylabel("Speedup", fontsize=16)  # Increased font size
     ax2.legend(fontsize=16, ncol=2)  # Increased legend font size
@@ -131,6 +131,21 @@ def time_number_of_nodes_bar(experiment_result: ExperimentResult):
     plt.legend(fontsize=18)
     plt.subplots_adjust(right=0.95, top=0.95)  # Increase margins dynamically
     plt.savefig(f'{experiment_result.experiment_result[0].parameters.app_name}_time_nodes.png')
+    # Calculate average speedup for "CPU+GPU" vs "GPU"
+    cpu_gpu_configurations = [col for col in df_pivot.columns if col.startswith("CPU+")]
+    gpu_configurations = [col for col in df_pivot.columns if col.startswith("GPU") and not col.startswith("CPU+")]
+
+    if cpu_gpu_configurations and gpu_configurations:
+        avg_speedups = []
+        for node in df_pivot.index:
+            cpu_gpu_times = df_pivot.loc[node, cpu_gpu_configurations].mean()  # Average time for CPU+GPU
+            gpu_times = df_pivot.loc[node, gpu_configurations].mean()  # Average time for GPU-only
+            if gpu_times > 0:
+                avg_speedup = gpu_times / cpu_gpu_times
+                avg_speedups.append(avg_speedup)
+        
+        overall_avg_speedup = sum(avg_speedups) / len(avg_speedups) if avg_speedups else None
+        print(f"Average speedup of CPU+GPU vs GPU-only: {overall_avg_speedup:.2f}")
 
 def time_number_of_nodes_scatter(experiment_result: ExperimentResult):
     nodes_cpu_gpu_one_stream = [multiple_run_result.parameters.number_od_nodes for multiple_run_result in experiment_result.experiment_result if multiple_run_result.parameters.cpu_enabled and multiple_run_result.parameters.number_of_streams == 1]

@@ -7,7 +7,7 @@ from charts import time_powercap_scatter, time_batch_size_scatter, time_number_o
 from experiments import run_experiment
 
 # For RNN: NUMBER_OF_RUNS = 5
-NUMBER_OF_RUNS = 1
+NUMBER_OF_RUNS = 10
 
 def experiment_time_nodes(description: str, app_name: str, file_path: str | os.PathLike, batch_size: int = 50000):
     common_run_parameters = functools.partial(
@@ -36,14 +36,15 @@ def experiment_time_nodes(description: str, app_name: str, file_path: str | os.P
     )
     run_experiment(experiment_file_name=file_path, experiment=experiment, number_of_runs=NUMBER_OF_RUNS)
 
-def experiment_time_powercap(description: str, app_name: str, file_path: str | os.PathLike):
+def experiment_time_powercap(description: str, app_name: str, file_path: str | os.PathLike, number_od_nodes: int = 16, batch_size: int = 480000, cpu_power_scaling: int | None = None, initial_cpu_batch_size_scaling=100):
     common_run_parameters = functools.partial(
         RunParameters,
         app_name=app_name,
-        batch_size=50000,
-        number_od_nodes=16,
-        cpu_power_scaling=None,
-        number_of_streams=2
+        batch_size=batch_size,
+        number_od_nodes=number_od_nodes,
+        cpu_power_scaling=cpu_power_scaling,
+        number_of_streams=2,
+        initial_cpu_batch_size_scaling=initial_cpu_batch_size_scaling
     )
     experiment = Experiment(
         description=description,
@@ -93,97 +94,23 @@ def experiment_time_batch_size(description: str, app_name: str, file_path: str |
 
 if __name__ == "__main__":
     
-    '''
+    # experiment_time_powercap(description="time(powercap)", app_name="collatz", file_path="collatz_powercap_16_nodes.json", number_od_nodes=16, batch_size=480000, cpu_power_scaling=0)
+    # experiment_time_powercap(description="time(powercap)", app_name="twinprime", file_path="twinprime_powercap_16_nodes.json", number_od_nodes=16, batch_size=480000, cpu_power_scaling=0)
+    # experiment_time_powercap(description="time(powercap)", app_name="vecmaxdiv", file_path="vecmaxdiv_powercap_16_nodes.json", number_od_nodes=16, batch_size=960000, cpu_power_scaling=0)
+
+    # experiment_time_powercap(description="time(powercap)", app_name="collatz", file_path="065-collatz_powercap_16_nodes.json", number_od_nodes=16, batch_size=480000, cpu_power_scaling=0.65)
+    # experiment_time_powercap(description="time(powercap)", app_name="twinprime", file_path="064-twinprime_powercap_16_nodes.json", number_od_nodes=16, batch_size=480000, cpu_power_scaling=0.64)
+    # experiment_time_powercap(description="time(powercap)", app_name="vecmaxdiv", file_path="056-vecmaxdiv_powercap_16_nodes.json", number_od_nodes=16, batch_size=960000, cpu_power_scaling=0.56)
+
     experiment_time_batch_size(description="time(batch_size)", app_name="collatz", file_path="collatz_batch_size_16_nodes.json", number_of_nodes=16)
-    experiment_time_batch_size(description="time(batch_size)", app_name="collatz", file_path="collatz_batch_size_8_nodes.json", number_of_nodes=8)
-    experiment_time_batch_size(description="time(batch_size)", app_name="collatz", file_path="collatz_batch_size_4_nodes.json", number_of_nodes=4)
-    
-    experiment_time_batch_size(description="time(batch_size)", app_name="vecadd", file_path="vecadd_batch_size_16_nodes.json", number_of_nodes=16)
-    experiment_time_batch_size(description="time(batch_size)", app_name="vecadd", file_path="vecadd_batch_size_8_nodes.json", number_of_nodes=8)
-    experiment_time_batch_size(description="time(batch_size)", app_name="vecadd", file_path="vecadd_batch_size_4_nodes.json", number_of_nodes=4)
-
-    experiment_time_batch_size(description="time(batch_size)", app_name="vecmaxdiv", file_path="vecmaxdiv_batch_size_16_nodes.json", number_of_nodes=16)
-    experiment_time_batch_size(description="time(batch_size)", app_name="vecmaxdiv", file_path="vecmaxdiv_batch_size_8_nodes.json", number_of_nodes=8)
-    experiment_time_batch_size(description="time(batch_size)", app_name="vecmaxdiv", file_path="vecmaxdiv_batch_size_4_nodes.json", number_of_nodes=4)
-    
-    experiment_time_batch_size(description="time(batch_size)", app_name="patternsearch", file_path="patternsearch_batch_size_16_nodes.json", number_of_nodes=16)
-    experiment_time_batch_size(description="time(batch_size)", app_name="patternsearch", file_path="patternsearch_batch_size_8_nodes.json", number_of_nodes=8)
-    experiment_time_batch_size(description="time(batch_size)", app_name="patternsearch", file_path="patternsearch_batch_size_4_nodes.json", number_of_nodes=4)
-
-    experiment_time_batch_size(description="time(batch_size)", app_name="rnn", file_path="rnn_batch_size_16_nodes.json", number_of_nodes=16)
-    experiment_time_batch_size(description="time(batch_size)", app_name="rnn", file_path="rnn_batch_size_8_nodes.json", number_of_nodes=8)
-    experiment_time_batch_size(description="time(batch_size)", app_name="rnn", file_path="rnn_batch_size_4_nodes.json", number_of_nodes=4)
-    '''
-
-    # experiment_time_nodes(description="time(number_of_nodes) and number of streams", app_name="collatz", file_path="collatz_time_nodes.json", batch_size=480_000)
-    # experiment_time_nodes(description="time(number_of_nodes) and number of streams", app_name="vecadd", file_path="vecadd_time_nodes.json", batch_size=480_000)
-    # experiment_time_nodes(description="time(number_of_nodes) and number of streams", app_name="vecmaxdiv", file_path="vecmaxdiv_time_nodes.json", batch_size=960_000)
-    # experiment_time_nodes(description="time(number_of_nodes) and number of streams", app_name="patternsearch", file_path="patternsearch_time_nodes.json", batch_size=960_000)
-    '''
-    experiment_time_nodes(description="time(number_of_nodes) and number of streams", app_name="rnn", file_path="rnn_time_nodes.json", batch_size=100)
-    '''
-    
-    '''
     exp = ExperimentResult.from_file("../cudampilib/collatz_batch_size_16_nodes.json")
     time_batch_size_scatter(exp)
-    exp = ExperimentResult.from_file("../cudampilib/collatz_batch_size_8_nodes.json")
-    time_batch_size_scatter(exp)
-    exp = ExperimentResult.from_file("../cudampilib/collatz_batch_size_4_nodes.json")
-    time_batch_size_scatter(exp)
 
-    exp = ExperimentResult.from_file("../cudampilib/vecadd_batch_size_16_nodes.json")
-    time_batch_size_scatter(exp)
-    exp = ExperimentResult.from_file("../cudampilib/vecadd_batch_size_8_nodes.json")
-    time_batch_size_scatter(exp)
-    exp = ExperimentResult.from_file("../cudampilib/vecadd_batch_size_4_nodes.json")
-    time_batch_size_scatter(exp)
-
-    exp = ExperimentResult.from_file("../cudampilib/vecmaxdiv_batch_size_16_nodes.json")
-    time_batch_size_scatter(exp)
-    exp = ExperimentResult.from_file("../cudampilib/vecmaxdiv_batch_size_8_nodes.json")
-    time_batch_size_scatter(exp)
-    exp = ExperimentResult.from_file("../cudampilib/vecmaxdiv_batch_size_4_nodes.json")
-    time_batch_size_scatter(exp)
-
-    exp = ExperimentResult.from_file("../cudampilib/patternsearch_batch_size_16_nodes.json")
-    time_batch_size_scatter(exp)
-    exp = ExperimentResult.from_file("../cudampilib/patternsearch_batch_size_8_nodes.json")
-    time_batch_size_scatter(exp)
-    exp = ExperimentResult.from_file("../cudampilib/patternsearch_batch_size_4_nodes.json")
-    time_batch_size_scatter(exp)
-
-    exp = ExperimentResult.from_file("../cudampilib/rnn_batch_size_16_nodes.json")
-    time_batch_size_scatter(exp)
-    exp = ExperimentResult.from_file("../cudampilib/rnn_batch_size_4_nodes.json")
-    time_batch_size_scatter(exp)
-    exp = ExperimentResult.from_file("../cudampilib/rnn_batch_size_8_nodes.json")
-    time_batch_size_scatter(exp)
-    '''
-
+    
+    experiment_time_nodes(description="time(number_of_nodes) and number of streams", app_name="collatz", file_path="collatz_time_nodes.json", batch_size=480000)
     exp = ExperimentResult.from_file("../cudampilib/collatz_time_nodes.json")
     time_number_of_nodes_bar(exp)
-    time_number_of_nodes_scatter(exp)
-    
-    exp = ExperimentResult.from_file("../cudampilib/vecadd_time_nodes.json")
-    time_number_of_nodes_bar(exp)
-    time_number_of_nodes_scatter(exp)
 
-    exp = ExperimentResult.from_file("../cudampilib/vecmaxdiv_time_nodes.json")
-    time_number_of_nodes_bar(exp)
-    time_number_of_nodes_scatter(exp)
-
-    exp = ExperimentResult.from_file("../cudampilib/patternsearch_time_nodes.json")
-    time_number_of_nodes_bar(exp)
-    time_number_of_nodes_scatter(exp)
-
-    '''
-    exp = ExperimentResult.from_file("../cudampilib/rnn_time_nodes.json")
-    time_number_of_nodes_bar(exp)
-    time_number_of_nodes_scatter(exp)
-    '''
-
-
-
-    # experiment_time_powercap(description="time(powercap)", app_name="collatz", file_path="collatz_powercap_16_nodes.json")
-    # exp = ExperimentResult.from_file("../python_scripts/collatz_powercap_16_nodes.json")
-    # time_powercap_scatter(exp)
+    experiment_time_powercap(description="time(powercap)", app_name="collatz", file_path="collatz_powercap_16_nodes.json", number_od_nodes=16, batch_size=480000, cpu_power_scaling=0)
+    exp = ExperimentResult.from_file("../cudampilib/collatz_powercap_16_nodes.json")
+    time_powercap_scatter(exp) 

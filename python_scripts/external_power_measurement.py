@@ -12,9 +12,9 @@ NUMBER_OF_STREAMS = 2
 POWERCAP = 0
 NUMBER_OF_NODES = 2
 
-SSH_USER_NAME = ''
-SSH_PASSWORD = ''
-SSH_HOST = '172.20.83.215'
+SSH_USER_NAME = 'student'
+SSH_PASSWORD = 'student'
+SSH_HOST = '172.20.83.214'
 
 def ssh_read_energy(username: str, password: str, host: str = SSH_HOST, port: int = 22):
     """Read energy from remote slave node"""
@@ -81,16 +81,8 @@ if __name__ == "__main__":
 
     os.chdir(Path.home() / "parallel-processing-cpu-and-gpu-env-and-lib-with-powercap/cudampilib")
     commands = [
-        f"./run_scripts/run-app collatz B {NUMBER_OF_NODES} --cpu-enabled=0 --number-of-streams={NUMBER_OF_STREAMS} --batch-size=480000 --powercap={POWERCAP} --problem-size={PROBLEM_SIZE} --initial-cpu-batch-size-scaling=100",
-        f"./run_scripts/run-app collatz B {NUMBER_OF_NODES} --cpu-enabled=1 --number-of-streams={NUMBER_OF_STREAMS} --batch-size=480000 --powercap={POWERCAP} --problem-size={PROBLEM_SIZE} --initial-cpu-batch-size-scaling=100",
-        f"./run_scripts/run-app vecadd B {NUMBER_OF_NODES} --cpu-enabled=0 --number-of-streams={NUMBER_OF_STREAMS} --batch-size=48000 --powercap={POWERCAP} --problem-size={PROBLEM_SIZE} --initial-cpu-batch-size-scaling=100",
-        f"./run_scripts/run-app vecadd B {NUMBER_OF_NODES} --cpu-enabled=1 --number-of-streams={NUMBER_OF_STREAMS} --batch-size=48000 --powercap={POWERCAP} --problem-size={PROBLEM_SIZE} --initial-cpu-batch-size-scaling=100",
-        f"./run_scripts/run-app vecmaxdiv B {NUMBER_OF_NODES} --cpu-enabled=0 --number-of-streams={NUMBER_OF_STREAMS} --batch-size=960000 --powercap={POWERCAP} --problem-size={PROBLEM_SIZE} --initial-cpu-batch-size-scaling=100",
-        f"./run_scripts/run-app vecmaxdiv B {NUMBER_OF_NODES} --cpu-enabled=1 --number-of-streams={NUMBER_OF_STREAMS} --batch-size=960000 --powercap={POWERCAP} --problem-size={PROBLEM_SIZE} --initial-cpu-batch-size-scaling=100",
-        f"./run_scripts/run-app patternsearch B {NUMBER_OF_NODES} --cpu-enabled=0 --number-of-streams={NUMBER_OF_STREAMS} --batch-size=960000 --powercap={POWERCAP} --problem-size={PROBLEM_SIZE} --initial-cpu-batch-size-scaling=100",
-        f"./run_scripts/run-app patternsearch B {NUMBER_OF_NODES} --cpu-enabled=1 --number-of-streams={NUMBER_OF_STREAMS} --batch-size=960000 --powercap={POWERCAP} --problem-size={PROBLEM_SIZE} --initial-cpu-batch-size-scaling=100",
-        f"./run_scripts/run-app rnn B {NUMBER_OF_NODES} --cpu-enabled=0 --number-of-streams={NUMBER_OF_STREAMS} --batch-size=100 --powercap={POWERCAP} --problem-size=4000 --initial-cpu-batch-size-scaling=0",
-        f"./run_scripts/run-app rnn B {NUMBER_OF_NODES} --cpu-enabled=1 --number-of-streams={NUMBER_OF_STREAMS} --batch-size=100 --powercap={POWERCAP} --problem-size=4000 --initial-cpu-batch-size-scaling=0",
+        f"./run_scripts/run-app twinprime B {NUMBER_OF_NODES} --cpu-enabled=0 --number-of-streams={NUMBER_OF_STREAMS} --batch-size=480000 --powercap={POWERCAP} --initial-cpu-batch-size-scaling=100",
+        f"./run_scripts/run-app twinprime B {NUMBER_OF_NODES} --cpu-enabled=1 --number-of-streams={NUMBER_OF_STREAMS} --batch-size=480000 --powercap={POWERCAP} --initial-cpu-batch-size-scaling=100"
     ]
     
     for command in commands:
