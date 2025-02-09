@@ -14,6 +14,30 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OU
 #include <cuda_runtime.h>
 #include <omp.h>
 #include <string.h>
+#include "cudampi.h"
+
+typedef struct {
+    float min;
+    float max;
+    float defaultPowerCap;
+    unsigned long long timeWindowUs; // Used just for CPU, but for now, let's keep it for simplicity
+} powercapRange_t;
+
+typedef struct 
+{
+  powercapRange_t gpuRange[MAX_GPU_PER_NODE];
+  powercapRange_t cpuRange;
+} perNodePowerCapRange_t;
+
+typedef struct
+{
+    powercapRange_t powercapRange;
+    float currentPower;
+    float currentPowerCap;
+    float minPowerCap;
+    int deviceEnabled;
+    unsigned long long defaultPowerCap;
+} devicePowerConfig_t;
 
 float computeDevPerformance(double period_us);
 
@@ -24,3 +48,12 @@ cudaError_t getCpuEnergyUsed(float* lastEnergyMeasured, float* energyUsed);
 cudaError_t __cudampi__getCpuFreeThreads(int* count);
 
 void initializeCpuEnergyMeasurement(int* isInitialCpuEnergyMeasured, omp_lock_t* cpuEnergyLock, float* cpuLastEnergyMeasured);
+
+powercapRange_t __cudampi__getCpuPowerCapRange();
+
+powercapRange_t __cudampi__getGpuPowerCapRange(int gpuid);
+
+void __cudampi__setGpuPowerCap(int gpuid, float powerCap);
+
+void __cudampi__setCpuPowerCap(float powerCap, unsigned long long timeWindowUs);
+

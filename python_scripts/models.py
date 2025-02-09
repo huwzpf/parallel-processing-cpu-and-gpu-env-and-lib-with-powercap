@@ -59,8 +59,11 @@ class SingleRunResult:
 
     @staticmethod
     def get_energy_used_from_output(stdout: str, stderr: str):
-        energy_match = re.search(r'Total energy used ([\d.]+)', stderr)
-        ret = float(energy_match.group(1))
+        total_energy_match = re.search(r'Terminating CUDAMPILIB, Total energy used ([\d.]+)', stderr)
+        if total_energy_match:
+            ret = float(total_energy_match.group(1))
+        else:
+            ret = 0.0
         print(f"Energy used: {ret}")
         return ret
     
