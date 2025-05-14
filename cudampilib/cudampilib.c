@@ -914,9 +914,8 @@ void __cudampi__terminateMPI() {
 
   nvmlShutdown();
 
-  if (__cudampi__isglobalpowerlimitset) {
-    log_message(LOG_WARN, "Terminating CUDAMPILIB, Total energy used %lf J", __cudampi__totalEnergyUsed);
-  }
+  log_message(LOG_WARN, "Terminating CUDAMPILIB, Total energy used %lf J", __cudampi__totalEnergyUsed);
+
   
   for (int i = 0; i < MAX_THREADS; i++) {
     omp_destroy_lock(&cpuEnergyLock[i]);
@@ -1085,7 +1084,7 @@ cudaError_t __cudampi__deviceSynchronize(void) {
   if (__cudampi_isLocalGpu) { // run GPU synchronization locally
 
     // now get power measurement - this should be OK as we assume that computations might be taking place
-    if (__cudampi__isglobalpowerlimitset) {
+    if (1) {
       cudaError_t error = cudaErrorUnknown;
       error = getCpuEnergyUsed(&cpuLastEnergyMeasured[omp_get_thread_num()], &energy);
       energy /= __cudampi__localGpuDeviceCount;
@@ -1100,7 +1099,7 @@ cudaError_t __cudampi__deviceSynchronize(void) {
   } else { // run synchronization remotely
     int targetrank = __cudampi__gettargetMPIrank(__cudampi__currentDevice);
 
-    int sdata = __cudampi__isglobalpowerlimitset; // if 0 then means do not measure power, if 1 do measure on the slave side
+    int sdata = 1; // if 0 then means do not measure power, if 1 do measure on the slave side
 
     int rsize = sizeof(cudaError_t) + sizeof(float) + sizeof(float);
     unsigned char rdata[rsize];
