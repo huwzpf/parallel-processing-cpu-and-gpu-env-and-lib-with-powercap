@@ -21,6 +21,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OU
 #define MPI_LOGGING
 #include "logger.h"
 
+
 float computeDevPerformance(double period_us) {
   // period is just the time between two events so compute performance as an inverse
 
@@ -77,7 +78,6 @@ powercapRange_t __cudampi__getCpuPowerCapRange()
   fclose(file);
 
   range.max = (float)max / 1e6;
-
   file = fopen("/sys/class/powercap/intel-rapl:0/constraint_0_power_limit_uw", "r");
   if (file == NULL) {
     log_message(LOG_ERROR, "Failed to open constraint_0_power_limit_uw file for reading");
@@ -94,8 +94,8 @@ powercapRange_t __cudampi__getCpuPowerCapRange()
 
   fclose(file);
 
-  range.defaultPowerCap = (float)powerCap_uw / 1e6;
-
+  // range.defaultPowerCap = (float)powerCap_uw / 1e6;
+  range.defaultPowerCap = range.max;
   file = fopen("/sys/class/powercap/intel-rapl:0/constraint_0_time_window_us", "r");
   if (file == NULL) {
     log_message(LOG_ERROR, "Failed to open constraint_0_time_window_us file for reading");
@@ -142,7 +142,7 @@ powercapRange_t __cudampi__getGpuPowerCapRange(int gpuid)
       return range;
   }
 
-  result = nvmlDeviceGetPowerManagementLimit(nvmlDevice, &defaultPower);
+  result = nvmlDeviceGetPowerManagementDefaultLimit(nvmlDevice, &defaultPower);
   if (result != NVML_SUCCESS) {
       log_message(LOG_ERROR, "Failed to get current power management limit: %s", nvmlErrorString(result));
       range.defaultPowerCap = -1;
@@ -160,9 +160,17 @@ void __cudampi__setGpuPowerCap(int gpuid, float powerCap)
 {
   nvmlReturn_t result;
   nvmlDevice_t nvmlDevice;
-  unsigned int powerCap_uw = (unsigned int)(powerCap * 1000.0);
+  unsigned int powerCap_uw = (unsigned int)powerCap;
   log_message(LOG_INFO, "Setting GPU %d power cap to %f W", gpuid, powerCap);
-
+  
+  char command[256];
+  snprintf(command, sizeof(command), "echo \"password\" | sudo -S nvidia-smi -i %d -pl %u > /dev/null 2>&1", gpuid, powerCap_uw);
+  int ret = system(command);
+  if (ret != 0) {
+    log_message(LOG_ERROR, "Failed to set power cap using nvidia-smi. Command: %s", command);
+  }
+  
+  /*
   result = nvmlDeviceGetHandleByIndex(gpuid, &nvmlDevice);
   if (result != NVML_SUCCESS) {
       log_message(LOG_ERROR, "nvmlDeviceGetHandleByIndex failed: %s", nvmlErrorString(result));
@@ -173,6 +181,7 @@ void __cudampi__setGpuPowerCap(int gpuid, float powerCap)
   if (result != NVML_SUCCESS) {
       log_message(LOG_ERROR, "Failed to set power management limit (%ld): %s", powerCap_uw, nvmlErrorString(result));
   }
+  */
 }
 
 void __cudampi__setCpuPowerCap(float powerCap, unsigned long long timeWindowUs)
@@ -252,6 +261,7 @@ cudaError_t __cudampi__getCpuFreeThreads(int* count)
         fclose(file);
         return cudaErrorUnknown;
     }
+  
     *energyUsed = ((float)((energy_uj + maxCounter) / 1e6)) - *lastEnergyMeasured;
   }
 

@@ -39,6 +39,22 @@ typedef struct
     unsigned long long defaultPowerCap;
 } devicePowerConfig_t;
 
+typedef struct {
+    /* config */
+    double  eps;                            /* finite-difference step  */
+    double  alpha;                          /* learning rate           */
+
+    /* state machine */
+    int     mode;                           /* 0 = need BASE sample    */
+    int     probe_dim;                      /* which coordinate probe  */
+
+    /* working buffers                                                */
+    double  base_x   [__CUDAMPI_MAX_THREAD_COUNT];
+    double  base_y   [__CUDAMPI_MAX_THREAD_COUNT];
+    double  grad     [__CUDAMPI_MAX_THREAD_COUNT];
+} gradientOpt_t;
+
+
 float computeDevPerformance(double period_us);
 
 float getGPUpower(int gpuid);

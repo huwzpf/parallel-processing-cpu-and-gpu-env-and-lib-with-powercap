@@ -13,16 +13,17 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OU
 #include <cuda_runtime.h>
 #include <mpi.h>
 
-#define __CUDAMPI_MAX_THREAD_COUNT 1024 // maximum number of threads in the app (client/process 0 part)
 
 // Values below are expressed in terms of possible power cap range
 // i.e. if min possible power cap is 100W and max is 250W, then 0.25 means 100W + 0.25 * (250W - 100W) = 137.5W
 #define CPU_MIN_POWERCAP 0.33
 #define GPU_MIN_POWERCAP 0.33
+#define START_POWERCAP_FOR_GRAD_OPT 0.75
 
 typedef enum {
   CONTINOUS_EQUAL,
-  BINARY_GREEDY
+  BINARY_GREEDY,
+  EDP_GRADIENT_OPT
 } powercapStrategy_t;
 
 extern __global__ void kernel(long *devPtr);

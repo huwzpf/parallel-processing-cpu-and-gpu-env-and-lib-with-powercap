@@ -7,7 +7,7 @@ from charts import time_powercap_scatter, time_batch_size_scatter, time_number_o
 from experiments import run_experiment
 
 # For RNN: NUMBER_OF_RUNS = 5
-NUMBER_OF_RUNS = 5
+NUMBER_OF_RUNS = 3
 
 def experiment_time_nodes(description: str, app_name: str, file_path: str | os.PathLike, batch_size: int = 50000):
     common_run_parameters = functools.partial(
@@ -55,7 +55,8 @@ def experiment_time_powercap(description: str, app_name: str, file_path: str | o
                         common_run_parameters(cpu_enabled=True, powercap=powercap),
                         common_run_parameters(cpu_enabled=False, powercap=powercap),
                     ]
-                for powercap in [500, 1000, 2000, 3000]
+                # for powercap in range(500, 4000, 250)
+                for powercap in [500, 700, 1000, 1200, 1500, 2000]
                 ]
             )
         )
@@ -102,4 +103,15 @@ if __name__ == "__main__":
     # experiment_time_powercap(description="time(powercap)", app_name="twinprime", file_path="064-twinprime_powercap_16_nodes.json", number_od_nodes=16, batch_size=480000, cpu_power_scaling=0.64)
     # experiment_time_powercap(description="time(powercap)", app_name="vecmaxdiv", file_path="056-vecmaxdiv_powercap_16_nodes.json", number_od_nodes=16, batch_size=960000, cpu_power_scaling=0.56)
 
-    experiment_time_powercap(description="time(powercap)", app_name="rnn", file_path="rnn_powercap_16_nodes.json", number_od_nodes=16, batch_size=480000, cpu_power_scaling=0)
+    # experiment_time_batch_size(description="time(batch_size)", app_name="collatz", file_path="collatz_batch_size_16_nodes.json", number_of_nodes=16)
+    # exp = ExperimentResult.from_file("../cudampilib/collatz_batch_size_16_nodes.json")
+    # time_batch_size_scatter(exp)
+
+    
+    # experiment_time_nodes(description="time(number_of_nodes) and number of streams", app_name="collatz", file_path="collatz_time_nodes.json", batch_size=480000)
+    # exp = ExperimentResult.from_file("../cudampilib/collatz_time_nodes.json")
+    # time_number_of_nodes_bar(exp)
+
+    experiment_time_powercap(description="time(powercap)", app_name="collatz", file_path="continous_collatz_powercap_4_nodes.json", number_od_nodes=4, batch_size=480000, cpu_power_scaling=0)
+    exp = ExperimentResult.from_file("../cudampilib/continous_collatz_powercap_4_nodes.json")
+    time_powercap_scatter(exp) 
