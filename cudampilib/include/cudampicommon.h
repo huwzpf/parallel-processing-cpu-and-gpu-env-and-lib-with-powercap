@@ -36,8 +36,24 @@ typedef struct
     float currentPowerCap;
     float minPowerCap;
     int deviceEnabled;
-    unsigned long long defaultPowerCap;
 } devicePowerConfig_t;
+
+typedef enum {
+    PROBE_PLUS,
+    PROBE_MINUS,
+    DESCENT
+} spsaState_t;
+
+/*
+typedef struct {
+    double  eps;                       
+    double  alpha;
+    spsaState_t     mode;
+    double  base_x   [__CUDAMPI_MAX_THREAD_COUNT];
+    double  delta   [__CUDAMPI_MAX_THREAD_COUNT];
+    double  J_plus;
+} gradientOpt_t;
+*/
 
 typedef struct {
     /* config */
@@ -53,7 +69,6 @@ typedef struct {
     double  base_y   [__CUDAMPI_MAX_THREAD_COUNT];
     double  grad     [__CUDAMPI_MAX_THREAD_COUNT];
 } gradientOpt_t;
-
 
 float computeDevPerformance(double period_us);
 

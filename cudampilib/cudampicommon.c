@@ -164,7 +164,7 @@ void __cudampi__setGpuPowerCap(int gpuid, float powerCap)
   log_message(LOG_INFO, "Setting GPU %d power cap to %f W", gpuid, powerCap);
   
   char command[256];
-  snprintf(command, sizeof(command), "echo \"password\" | sudo -S nvidia-smi -i %d -pl %u > /dev/null 2>&1", gpuid, powerCap_uw);
+  snprintf(command, sizeof(command), "echo \"haslo\" | sudo -S nvidia-smi -i %d -pl %u > /dev/null 2>&1", gpuid, powerCap_uw);
   int ret = system(command);
   if (ret != 0) {
     log_message(LOG_ERROR, "Failed to set power cap using nvidia-smi. Command: %s", command);
