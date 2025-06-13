@@ -87,7 +87,6 @@ int main(int argc, char* argv[])
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &world);
     MPI_Barrier(MPI_COMM_WORLD);
-    Kokkos::Timer total_timer;
 
     const std::uint64_t base = (VECTORSIZE_TOTAL / world) * rank;
 
@@ -105,6 +104,7 @@ int main(int argc, char* argv[])
     });
     Kokkos::deep_copy(next, std::uint64_t(0));
     Kokkos::fence();
+    Kokkos::Timer total_timer;
 
 
     CollatzPrimeFunctor<Kokkos::Cuda> gpu_f(in, out, next, local_size, BATCH_SIZE);
