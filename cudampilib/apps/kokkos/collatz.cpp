@@ -117,17 +117,6 @@ int main(int argc, char* argv[])
     Kokkos::fence();
 
     MPI_Barrier(MPI_COMM_WORLD);          
-
-    MPI_Gather(
-      /* sendbuf */    out.data(), 
-      /* sendcount */  static_cast<int>(local_size),
-      /* sendtype */   MPI_UINT64_T,
-      /* recvbuf */    all_out.data() + rank * local_size,
-      /* recvcount */  local_size,
-      /* recvtype */   MPI_UINT64_T,
-      /* root */       0,
-      /* comm */       MPI_COMM_WORLD
-    );
       
     if (rank == 0){
         double local_time = total_timer.seconds();

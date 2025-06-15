@@ -46,7 +46,7 @@ enum TaskIDs {
   TID_COLLATZ,
 };
 
-static inline int isprime(long a) 
+static inline int isprime(int64_t a) 
 {
   long i;
   for (i = 2; i < sqrt((double)a) + 1; i++) 
@@ -59,8 +59,8 @@ static inline int isprime(long a)
   return 1;
 }
 
-static inline int collatz_steps(int64_t start) {
-  int counter = 0;
+static inline int64_t collatz_steps(int64_t start) {
+  int64_t counter = 0;
 
   if (isprime(start)) 
   {
@@ -77,7 +77,7 @@ void collatz_cpu_task(const Task*, const std::vector<PhysicalRegion>& regs,
                       Context ctx, Runtime* rt)
 {
   AccessorRO<int64_t,1> in (regs[0], FID_IN);
-  AccessorWO<int,    1> out(regs[1], FID_OUT);
+  AccessorWO<int64_t,    1> out(regs[1], FID_OUT);
 
   Rect<1> r = rt->get_index_space_domain(
                 ctx, regs[0].get_logical_region().get_index_space());
@@ -99,8 +99,8 @@ __device__ __forceinline__ int gpu_isprime(int64_t a)
   return 1;
 }
 
-__device__ __forceinline__ int gpu_collatz(int64_t start) {
-  int counter = 0;
+__device__ __forceinline__ int64_t gpu_collatz(int64_t start) {
+  int64_t counter = 0;
 
   if (gpu_isprime(start)) 
   {
@@ -113,7 +113,7 @@ __device__ __forceinline__ int gpu_collatz(int64_t start) {
   return counter;
 }
 
-__global__ void collatz_kernel(const int64_t* in, int* out, size_t n) {
+__global__ void collatz_kernel(const int64_t* in, int64_t* out, size_t n) {
   size_t i = blockIdx.x * blockDim.x + threadIdx.x;
   if (i < n) out[i] = gpu_collatz(in[i]);
 }
@@ -122,14 +122,14 @@ void collatz_gpu_task(const Task*, const std::vector<PhysicalRegion>& regs,
                       Context ctx, Runtime* rt)
 {
   AccessorRO<int64_t,1> in (regs[0], FID_IN);
-  AccessorWO<int,    1> out(regs[1], FID_OUT);
+  AccessorWO<int64_t,    1> out(regs[1], FID_OUT);
 
   Rect<1> r = rt->get_index_space_domain(
                 ctx, regs[0].get_logical_region().get_index_space());
 
   size_t strides[1];
   const int64_t* in_ptr  = in.ptr(r, strides);
-  int*           out_ptr = out.ptr(r, strides);
+  int64_t*           out_ptr = out.ptr(r, strides);
 
   const size_t N = r.volume();
   const int BLOCK = 64;
@@ -178,7 +178,7 @@ void top_level_task(const Task*, const std::vector<PhysicalRegion>&,
   {
     FieldAllocator fa = rt->create_field_allocator(ctx, fs);
     fa.allocate_field(sizeof(int64_t), FID_IN);
-    fa.allocate_field(sizeof(int),     FID_OUT);
+    fa.allocate_field(sizeof(int64_t),     FID_OUT);
   }
   LogicalRegion lr = rt->create_logical_region(ctx, is, fs);
 
@@ -191,7 +191,6 @@ void top_level_task(const Task*, const std::vector<PhysicalRegion>&,
     init.add_field(0, FID_IN);
     rt->execute_task(ctx, init).wait();
   }
-  auto t0 = std::chrono::high_resolution_clock::now();
 
   // Partition into stealable batches
   const int64_t NB = (N + B - 1) / B;           // #batch colors
@@ -219,6 +218,7 @@ void top_level_task(const Task*, const std::vector<PhysicalRegion>&,
                         WRITE_DISCARD, EXCLUSIVE, lr));
   il.add_field(1, FID_OUT);
 
+  auto t0 = std::chrono::high_resolution_clock::now();
   FutureMap fm = rt->execute_index_space(ctx, il);
   fm.wait_all_results();
   auto t1 = std::chrono::high_resolution_clock::now();

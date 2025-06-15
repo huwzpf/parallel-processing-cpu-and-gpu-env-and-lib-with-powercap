@@ -176,8 +176,6 @@ int main()
         cudaMalloc(&d_out, BATCH * sizeof(std::int64_t));
 
         std::vector<std::int64_t> host_in(BATCH), host_out(BATCH);
-        hpx::cuda::experimental::check_cuda_error(cudaHostRegister(host_in.data(), BATCH * sizeof(std::int64_t), cudaHostRegisterDefault));
-        hpx::cuda::experimental::check_cuda_error(cudaHostRegister(host_out.data(), BATCH * sizeof(std::int64_t), cudaHostRegisterDefault));
 
         while (true)
         {
@@ -202,7 +200,6 @@ int main()
 
             hpx::async(return_out, data_gid, begin, host_out).get();
         }
-        cudaFree(d_in); cudaFree(d_out);
     };
 
 
