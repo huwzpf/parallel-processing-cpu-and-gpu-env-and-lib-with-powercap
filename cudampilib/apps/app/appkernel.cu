@@ -26,7 +26,7 @@ __global__ void appkernel(unsigned char *devPtr) {
   devPtr[my_index] = devPtr[my_index] / 2;
 }
 
-extern "C" void launchkernelinstream(void *devPtr, unsigned long batchSize, cudaStream_t stream) {
+extern "C" void launchkernelinstream(void *devPtr, unsigned long batchSize, cudaStream_t stream, unsigned long long id) {
 
   dim3 blocksingrid(2);
   dim3 threadsinblock(1024);
@@ -38,4 +38,4 @@ extern "C" void launchkernelinstream(void *devPtr, unsigned long batchSize, cuda
   }
 }
 
-extern "C" void launchkernel(void *devPtr, unsigned long batchSize) { launchkernelinstream(devPtr, batchSize, 0); }
+extern "C" void launchkernel(void *devPtr, unsigned long batchSize, unsigned long long id) { launchkernelinstream(devPtr, batchSize, 0, id); }

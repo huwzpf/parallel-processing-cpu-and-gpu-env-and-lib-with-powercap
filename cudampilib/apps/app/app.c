@@ -45,7 +45,7 @@ int main(int argc, char **argv) {
 
     __cudampi__memcpy(devPtr, tab, 2048, cudaMemcpyHostToDevice);
 
-    __cudampi__kernel(devPtr);
+    __cudampi__kernel(devPtr, 0);
 
     __cudampi__memcpy(tab + 2048, devPtr, 2048, cudaMemcpyDeviceToHost);
 

@@ -91,7 +91,7 @@ void run_rnn_cpu(double* input, double* hidden_layer_buffer, double* output,
     }
 }
 
-extern void launchcpukernel(void *devPtr, unsigned long batchSize, int num_threads) 
+extern void launchcpukernel(void *devPtr, unsigned long batchSize, int num_threads, unsigned long long /* id */) 
 {
   mkl_enable_instructions(MKL_ENABLE_SSE4_2);
   mkl_set_num_threads_local(num_threads);

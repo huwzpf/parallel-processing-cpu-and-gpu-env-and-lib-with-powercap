@@ -102,7 +102,7 @@ void run_rnn(void* devPtr, unsigned long batch_size) {
     cublasDestroy(handle);
 }
 
-extern "C" void launchkernelinstream(void *devPtr, unsigned long batchSize, cudaStream_t stream) 
+extern "C" void launchkernelinstream(void *devPtr, unsigned long batchSize, cudaStream_t stream, unsigned long long id) 
 {
   run_rnn(devPtr,  batchSize);
   cudaError_t e = cudaGetLastError();
@@ -111,4 +111,4 @@ extern "C" void launchkernelinstream(void *devPtr, unsigned long batchSize, cuda
   }
 }
 
-extern "C" void launchkernel(void *devPtr, unsigned long batchSize) { launchkernelinstream(devPtr, batchSize, 0); }
+extern "C" void launchkernel(void *devPtr, unsigned long batchSize, unsigned long long id) { launchkernelinstream(devPtr, batchSize, 0, id); }

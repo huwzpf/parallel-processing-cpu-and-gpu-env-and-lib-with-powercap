@@ -79,13 +79,13 @@ cudaError_t __cudampi__cudaMemcpyAsync(void *dst, const void *src, size_t count,
 
 cudaError_t __cudampi__cpuMemcpyAsync(void *dst, const void *src, size_t count, enum cudaMemcpyKind kind, cudaStream_t stream);
 
-void __cudampi__cudaKernel(void *devPtr, unsigned long batchsize);
+void __cudampi__cudaKernel(void *devPtr, unsigned long batchsize, unsigned long long id);
 
-void __cudampi__cudaKernelInStream(void *devPtr, unsigned long batchsize, cudaStream_t stream);
+void __cudampi__cudaKernelInStream(void *devPtr, unsigned long batchsize, cudaStream_t stream, unsigned long long id);
 
-void __cudampi__cpuKernel(void *devPtr, unsigned long batchsize);
+void __cudampi__cpuKernel(void *devPtr, unsigned long batchsize, unsigned long long id);
 
-void __cudampi__cpuKernelInStream(void *devPtr, unsigned long batchsize, cudaStream_t stream);
+void __cudampi__cpuKernelInStream(void *devPtr, unsigned long batchsize, cudaStream_t stream, unsigned long long id);
 
 cudaError_t __cudampi__cudaGetDeviceCount(int *count);
 
@@ -109,6 +109,6 @@ cudaError_t __cudampi__memcpyAsync(void *dst, const void *src, size_t count, enu
 
 cudaError_t __cudampi__memcpy(void *dst, const void *src, size_t count, enum cudaMemcpyKind kind);
 
-void __cudampi__kernelInStream(void *devPtr, cudaStream_t stream);
+void __cudampi__kernelInStream(void *devPtr, cudaStream_t stream, unsigned long long id);
 
-void __cudampi__kernel(void *devPtr);
+void __cudampi__kernel(void *devPtr, unsigned long long id);

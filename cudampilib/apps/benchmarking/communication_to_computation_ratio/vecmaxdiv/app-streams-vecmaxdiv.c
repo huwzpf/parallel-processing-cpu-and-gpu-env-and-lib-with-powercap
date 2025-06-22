@@ -163,7 +163,7 @@ int main(int argc, char **argv)
         time_memcpy_h2d += (double)((stop_memcpy_h2d.tv_sec - start_memcpy_h2d.tv_sec) + (double)(stop_memcpy_h2d.tv_usec - start_memcpy_h2d.tv_usec) / 1000000.0);
         
         gettimeofday(&start_kernel, NULL);
-        __cudampi__kernel(devPtr);
+        __cudampi__kernel(devPtr, 0);
         gettimeofday(&stop_kernel, NULL);
         time_kernel += (double)((stop_kernel.tv_sec - start_kernel.tv_sec) + (double)(stop_kernel.tv_usec - start_kernel.tv_usec) / 1000000.0);
         

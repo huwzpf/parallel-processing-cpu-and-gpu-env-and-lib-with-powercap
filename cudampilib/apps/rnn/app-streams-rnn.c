@@ -221,7 +221,7 @@ int main(int argc, char **argv)
         //log_message(LOG_INFO, "[Thread %d] Sending chunk %ld with elements %ld (%ld , %ld), devPtr=%lld", omp_get_thread_num(), batch_pointer.start, batch_pointer.n_elements, (batch_pointer.start * INPUT_BATCH_SIZE), batch_pointer.n_elements * INPUT_BATCH_SIZE, devPtr);
 
         __cudampi__memcpyAsync(devPtra, vectora + (batch_pointer.start * INPUT_BATCH_SIZE), batch_pointer.n_elements * INPUT_BATCH_SIZE * sizeof(double), cudaMemcpyHostToDevice, stream1);
-        __cudampi__kernelInStream(devPtr, stream1);
+        __cudampi__kernelInStream(devPtr, stream1, 0);
         __cudampi__memcpyAsync(vectorc + (batch_pointer.start * OUTPUT_BATCH_SIZE), devPtrc, OUTPUT_BATCH_SIZE * sizeof(double), cudaMemcpyDeviceToHost, stream1);
 
         if (streamcount == 2) 
@@ -241,7 +241,7 @@ int main(int argc, char **argv)
 
 
             __cudampi__memcpyAsync(devPtra2, vectora + (batch_pointer.start * INPUT_BATCH_SIZE), batch_pointer.n_elements * INPUT_BATCH_SIZE * sizeof(double), cudaMemcpyHostToDevice, stream2);
-            __cudampi__kernelInStream(devPtr2, stream2);
+            __cudampi__kernelInStream(devPtr2, stream2, 0);
             __cudampi__memcpyAsync(vectorc + (batch_pointer.start * OUTPUT_BATCH_SIZE), devPtrc2,  OUTPUT_BATCH_SIZE * sizeof(double), cudaMemcpyDeviceToHost, stream2);
           }
         }
