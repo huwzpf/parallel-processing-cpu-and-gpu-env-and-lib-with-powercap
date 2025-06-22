@@ -49,7 +49,7 @@ void appkernel(void *devPtr, int num_elements, int num_threads)
   }
 }
 
-extern void launchcpukernel(void *devPtr, unsigned long batchSize, int num_threads) 
+extern void launchcpukernel(void *devPtr, unsigned long batchSize, int num_threads, unsigned long long /* id */) 
 {
   int num_elements = batchSize;
   log_message(LOG_DEBUG, "Launichng CPU Kernel with %i elements and %i threads.", num_elements, num_threads);

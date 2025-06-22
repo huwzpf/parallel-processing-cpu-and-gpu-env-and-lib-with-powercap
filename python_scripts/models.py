@@ -59,7 +59,10 @@ class SingleRunResult:
 
     @staticmethod
     def get_energy_used_from_output(stdout: str, stderr: str):
-        return 0.0
+        energy_match = re.search(r'Total energy used ([\d.]+)', stderr)
+        ret = float(energy_match.group(1))
+        print(f"Energy used: {ret}")
+        return ret
     
 
 @dataclass

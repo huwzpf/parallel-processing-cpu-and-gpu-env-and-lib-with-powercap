@@ -914,9 +914,8 @@ void __cudampi__terminateMPI() {
 
   nvmlShutdown();
 
-  if (__cudampi__isglobalpowerlimitset) {
-    log_message(LOG_WARN, "Terminating CUDAMPILIB, Total energy used %lf J", __cudampi__totalEnergyUsed);
-  }
+  log_message(LOG_WARN, "Terminating CUDAMPILIB, Total energy used %lf J", __cudampi__totalEnergyUsed);
+
   
   for (int i = 0; i < MAX_THREADS; i++) {
     omp_destroy_lock(&cpuEnergyLock[i]);
@@ -1085,7 +1084,7 @@ cudaError_t __cudampi__deviceSynchronize(void) {
   if (__cudampi_isLocalGpu) { // run GPU synchronization locally
 
     // now get power measurement - this should be OK as we assume that computations might be taking place
-    if (__cudampi__isglobalpowerlimitset) {
+    if (1) {
       cudaError_t error = cudaErrorUnknown;
       error = getCpuEnergyUsed(&cpuLastEnergyMeasured[omp_get_thread_num()], &energy);
       energy /= __cudampi__localGpuDeviceCount;
@@ -1100,7 +1099,7 @@ cudaError_t __cudampi__deviceSynchronize(void) {
   } else { // run synchronization remotely
     int targetrank = __cudampi__gettargetMPIrank(__cudampi__currentDevice);
 
-    int sdata = __cudampi__isglobalpowerlimitset; // if 0 then means do not measure power, if 1 do measure on the slave side
+    int sdata = 1; // if 0 then means do not measure power, if 1 do measure on the slave side
 
     int rsize = sizeof(cudaError_t) + sizeof(float) + sizeof(float);
     unsigned char rdata[rsize];
@@ -1408,43 +1407,45 @@ cudaError_t __cudampi__cpuMemcpyAsync(void *dst, const void *src, size_t count, 
   }
 }
 
-void launchkernelinstream(void *devPtr, unsigned long batchSize, cudaStream_t stream);
+void launchkernelinstream(void *devPtr, unsigned long batchSize, cudaStream_t stream, unsigned long long id);
 
-void __cudampi__cudaKernelInStream(void *devPtr, unsigned long batchsize, cudaStream_t stream) {
+void __cudampi__cudaKernelInStream(void *devPtr, unsigned long batchsize, cudaStream_t stream, unsigned long long id) {
   __cudampi__recordBatchSizeForDeviceStats(batchsize);
 
   if (__cudampi_isLocalGpu) { // run locally
     initializeCpuEnergyMeasurement(isInitialCpuEnergyMeasured, cpuEnergyLock, cpuLastEnergyMeasured);
-    launchkernelinstream(devPtr, batchsize, stream);
+    launchkernelinstream(devPtr, batchsize, stream, id);
   } else { // launch remotely
 
-    size_t ssize = sizeof(void *) + sizeof(unsigned long) + sizeof(cudaStream_t);
+    size_t ssize = sizeof(void *) + sizeof(unsigned long) + sizeof(cudaStream_t) + sizeof(unsigned long long);
     unsigned char sdata[ssize];
 
     *((void **)sdata) = devPtr;
     *((unsigned long*)(sdata + sizeof(void *))) = batchsize;
     *((cudaStream_t *)(sdata + sizeof(void *) + sizeof(unsigned long))) = stream;
+    *((unsigned long long *)(sdata + sizeof(void *) + sizeof(cudaStream_t))) = id;
 
     MPI_Send((void *)sdata, ssize, MPI_UNSIGNED_CHAR, 1, __cudampi__CUDAMPILAUNCHKERNELINSTREAMREQ, __cudampi__currentCommunicator);
     // No need to wait for response since all kernels return void
   }
 }
 
-void launchkernel(void *devPtr, unsigned long batchSize);  // extern from .cu
+void launchkernel(void *devPtr, unsigned long batchSize, unsigned long long id);  // extern from .cu
 
-void __cudampi__cudaKernel(void *devPtr, unsigned long batchsize) {
+void __cudampi__cudaKernel(void *devPtr, unsigned long batchsize, unsigned long long id) {
   __cudampi__recordBatchSizeForDeviceStats(batchsize);
 
   if (__cudampi_isLocalGpu) { // run locally
     initializeCpuEnergyMeasurement(isInitialCpuEnergyMeasured, cpuEnergyLock, cpuLastEnergyMeasured);
-    launchkernel(devPtr, batchsize);
+    launchkernel(devPtr, batchsize, id);
   } else { // launch remotely
 
-    size_t ssize = sizeof(void *) + sizeof(unsigned long);
+    size_t ssize = sizeof(void *) + sizeof(unsigned long) + sizeof(unsigned long long);
     unsigned char sdata[ssize];
 
     *((void **)sdata) = devPtr;
     *((unsigned long*)(sdata + sizeof(void *))) = batchsize;
+    *((unsigned long long*)(sdata + sizeof(void *) + sizeof(unsigned long))) = id;
 
     MPI_Send((void *)sdata, ssize, MPI_UNSIGNED_CHAR, 1, __cudampi__CUDAMPILAUNCHCUDAKERNELREQ, __cudampi__currentCommunicator);
 
@@ -1455,23 +1456,24 @@ void __cudampi__cudaKernel(void *devPtr, unsigned long batchsize) {
   }
 }
 
-void __cudampi__cpuKernelInStream(void *devPtr, unsigned long batchsize, cudaStream_t stream){
+void __cudampi__cpuKernelInStream(void *devPtr, unsigned long batchsize, cudaStream_t stream, unsigned long long id){
   __cudampi__recordBatchSizeForDeviceStats(batchsize);
 
   // launch remotely - since master does not use local threads for computations
-  size_t ssize = sizeof(void *) + sizeof(unsigned long) + sizeof(cudaStream_t);
+  size_t ssize = sizeof(void *) + sizeof(unsigned long) + sizeof(cudaStream_t) + sizeof(unsigned long long);
   unsigned char sdata[ssize];
 
   *((void **)sdata) = devPtr;
   *((unsigned long*)(sdata + sizeof(void *))) = batchsize;
   *((cudaStream_t *)(sdata + sizeof(void *) + sizeof(unsigned long))) = stream;
+  *((unsigned long long *)(sdata + sizeof(void *) + sizeof(unsigned long) + sizeof(cudaStream_t))) = id;
 
   MPI_Send((void *)sdata, ssize, MPI_UNSIGNED_CHAR, 1, __cudampi__CPULAUNCHKERNELREQ, __cudampi__currentCommunicator);
   // No need to wait for response since all kernels return void
 }
 
-void __cudampi__cpuKernel(void *devPtr, unsigned long batchsize) {
-  __cudampi__cpuKernelInStream(devPtr, batchsize, NULL);
+void __cudampi__cpuKernel(void *devPtr, unsigned long batchsize, unsigned long long id) {
+  __cudampi__cpuKernelInStream(devPtr, batchsize, NULL, id);
 }
 
 cudaError_t __cudampi__cudaStreamCreate(cudaStream_t *pStream) {
@@ -1591,20 +1593,20 @@ cudaError_t __cudampi__memcpy(void *dst, const void *src, size_t count, enum cud
   return __cudampi__cudaMemcpy(dst, src, count, kind);
 }
 
-void __cudampi__kernelInStream(void *devPtr, cudaStream_t stream) {
+void __cudampi__kernelInStream(void *devPtr, cudaStream_t stream, unsigned long long id) {
   if (__cudampi__isCpu())
   {
-    return __cudampi__cpuKernelInStream(devPtr, __cudampi__getCurrentBatchSize(), stream);
+    return __cudampi__cpuKernelInStream(devPtr, __cudampi__getCurrentBatchSize(), stream, id);
   }
   // else
-  return __cudampi__cudaKernelInStream(devPtr, __cudampi__getCurrentBatchSize(), stream);
+  return __cudampi__cudaKernelInStream(devPtr, __cudampi__getCurrentBatchSize(), stream, id);
 }
 
-void __cudampi__kernel(void *devPtr) {
+void __cudampi__kernel(void *devPtr, unsigned long long id) {
   if (__cudampi__isCpu())
   {
-    return __cudampi__cpuKernel(devPtr, __cudampi__getCurrentBatchSize());
+    return __cudampi__cpuKernel(devPtr, __cudampi__getCurrentBatchSize(), id);
   }
   // else
-  return __cudampi__cudaKernel(devPtr, __cudampi__getCurrentBatchSize());
+  return __cudampi__cudaKernel(devPtr, __cudampi__getCurrentBatchSize(), id);
 }

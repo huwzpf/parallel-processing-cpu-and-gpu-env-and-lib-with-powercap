@@ -81,7 +81,7 @@ cudaError_t __cudampi__getCpuFreeThreads(int* count)
 
   *energyUsed = energy_joules - *lastEnergyMeasured;
 
-  if (*energyUsed <= 0) {
+  if (*energyUsed < 0) {
     // energy_uj counter overflow
     unsigned long long maxCounter = 0;
 
@@ -96,8 +96,7 @@ cudaError_t __cudampi__getCpuFreeThreads(int* count)
         fclose(file);
         return cudaErrorUnknown;
     }
-  
-    *energyUsed = ((float)(energy_uj + maxCounter) / 1e6) - *lastEnergyMeasured;
+    *energyUsed = ((float)((energy_uj + maxCounter) / 1e6)) - *lastEnergyMeasured;
   }
 
   *lastEnergyMeasured = energy_joules;
