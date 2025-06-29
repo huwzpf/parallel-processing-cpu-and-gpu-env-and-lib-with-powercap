@@ -906,6 +906,19 @@ void __cudampi__terminateMPI() {
     log_message(LOG_INFO, "Data points processed by thread %d: %lld", i, __cudampi__data_points_sent[i]);
   }
 
+  unsigned long long gpuDataPointsSent = 0;
+  unsigned long long cpuDataPointsSent = 0;
+  for (int i = 0; i < __cudampi_totalgpudevicecount; i++) {
+    gpuDataPointsSent += __cudampi__data_points_sent[i];
+  }
+
+  for(int i = __cudampi_totalgpudevicecount; i < __cudampi_totaldevicecount; i++) {
+    cpuDataPointsSent += __cudampi__data_points_sent[i];
+  }
+
+  log_message(LOG_INFO, "Total data points processed by GPU threads: %llu", gpuDataPointsSent);
+  log_message(LOG_INFO, "Total data points processed by CPU threads: %llu", cpuDataPointsSent);
+  log_message(LOG_INFO, "CPU to GPU data points ratio: %lf", (double)cpuDataPointsSent / (double)gpuDataPointsSent);
   // finalize the other nodes -> shut down threads responsible for remote GPUs
 
   for (int i = __cudampi__localGpuDeviceCount; i < __cudampi_totaldevicecount; i++) {
