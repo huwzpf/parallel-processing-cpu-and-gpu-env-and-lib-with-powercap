@@ -10,6 +10,7 @@ THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR I
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 */
 #include "cudampicommon.h"
+#include <sys/time.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -21,6 +22,10 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OU
 #define MPI_LOGGING
 #include "logger.h"
 
+#include <unistd.h>
+#include <sys/socket.h>
+#include <sys/un.h>
+#define SOCKET_PATH "/tmp/gpu_power_tool.sock"
 
 float computeDevPerformance(double period_us) {
   // period is just the time between two events so compute performance as an inverse
@@ -156,7 +161,7 @@ powercapRange_t __cudampi__getGpuPowerCapRange(int gpuid)
   return range;
 }
 
-void __cudampi__setGpuPowerCap(int gpuid, float powerCap)
+void nvmlSetGpuPowerCap(int gpuid, float powerCap)
 {
   nvmlReturn_t result;
   nvmlDevice_t nvmlDevice;
@@ -164,7 +169,7 @@ void __cudampi__setGpuPowerCap(int gpuid, float powerCap)
   log_message(LOG_INFO, "Setting GPU %d power cap to %f W", gpuid, powerCap);
   
   char command[256];
-  snprintf(command, sizeof(command), "echo \"haslo\" | sudo -S nvidia-smi -i %d -pl %u > /dev/null 2>&1", gpuid, powerCap_uw);
+  snprintf(command, sizeof(command), "echo \"kr0pl4everes!t\" | sudo -S nvidia-smi -i %d -pl %u > /dev/null 2>&1", gpuid, powerCap_uw);
   int ret = system(command);
   if (ret != 0) {
     log_message(LOG_ERROR, "Failed to set power cap using nvidia-smi. Command: %s", command);
@@ -182,6 +187,68 @@ void __cudampi__setGpuPowerCap(int gpuid, float powerCap)
       log_message(LOG_ERROR, "Failed to set power management limit (%ld): %s", powerCap_uw, nvmlErrorString(result));
   }
   */
+}
+
+int socketSetGpuPowerCap(int gpuid, float powerCap)
+{
+    int sock;
+    struct sockaddr_un addr;
+    char payload[256];
+    char resp[1024];
+
+    // Create JSON request
+    int json_len = snprintf(payload, sizeof(payload),
+        "{\"command\":\"set_gpu_power_limit\",\"gpu_index\":%d,\"power_limit\":%.3f}",
+        gpuid, powerCap);
+    if (json_len < 0 || json_len >= (int)sizeof(payload)) {
+        log_message(LOG_ERROR,"Failed to create JSON payload");
+        return 1;
+    }
+
+    // Open UNIX socket
+    if ((sock = socket(AF_UNIX, SOCK_STREAM, 0)) < 0) {
+        log_message(LOG_ERROR,"socket creation failed: %s\n", strerror(errno));
+        return 1;
+    }
+
+    memset(&addr, 0, sizeof(addr));
+    addr.sun_family = AF_UNIX;
+    strncpy(addr.sun_path, SOCKET_PATH, sizeof(addr.sun_path) - 1);
+
+    if (connect(sock, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
+        log_message(LOG_ERROR,"connect failed: %s\n", strerror(errno));
+        close(sock);
+        return 1;
+    }
+
+    // Send request
+    if (send(sock, payload, strlen(payload), 0) < 0) {
+        log_message(LOG_ERROR,"send failed: %s\n", strerror(errno));
+        close(sock);
+        return 1;
+    }
+
+    // Receive response
+    ssize_t n = recv(sock, resp, sizeof(resp) - 1, 0);
+    if (n > 0) {
+        resp[n] = '\0';
+        log_message(LOG_DEBUG,"Daemon response: %s\n", resp);
+    } else if (n < 0) {
+        log_message(LOG_ERROR,"recv failed: %s\n", strerror(errno));
+        close(sock);
+        return 1;
+    }
+
+    close(sock);
+    return 0;
+}
+
+
+void __cudampi__setGpuPowerCap(int gpuid, float powerCap)
+{
+  if (socketSetGpuPowerCap(gpuid, powerCap) == 1) {
+    nvmlSetGpuPowerCap(gpuid, powerCap);
+  }
 }
 
 void __cudampi__setCpuPowerCap(float powerCap, unsigned long long timeWindowUs)
