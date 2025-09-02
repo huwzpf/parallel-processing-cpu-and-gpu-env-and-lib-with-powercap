@@ -14,10 +14,6 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OU
 #include <mpi.h>
 
 
-// Values below are expressed in terms of possible power cap range
-// i.e. if min possible power cap is 100W and max is 250W, then 0.25 means 100W + 0.25 * (250W - 100W) = 137.5W
-#define CPU_MIN_POWERCAP 0.33
-#define GPU_MIN_POWERCAP 0.33
 #define START_POWERCAP_FOR_GRAD_OPT 1.0
 
 typedef enum {
@@ -37,6 +33,8 @@ struct __cudampi__arguments_type
   float cpu_power_scaling;
   int cpu_batch_scaling_factor;
   int use_dynamic_scaling;
+  float gpu_min_powercap;
+  float cpu_min_powercap;
 };
 
 typedef struct

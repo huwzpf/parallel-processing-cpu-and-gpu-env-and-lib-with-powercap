@@ -39,8 +39,14 @@ int *__cudampi__freeThreadsPerNode;
 perNodePowerCapRange_t* __cudampi__perNodePowerCapRange;
 
 // powercapStrategy_t __cudampi__powercapStrategy = BINARY_GREEDY;
-// powercapStrategy_t __cudampi__powercapStrategy = CONTINOUS_EQUAL;
-powercapStrategy_t __cudampi__powercapStrategy = EDP_GRADIENT_OPT;
+ powercapStrategy_t __cudampi__powercapStrategy = CONTINOUS_EQUAL;
+// powercapStrategy_t __cudampi__powercapStrategy = EDP_GRADIENT_OPT;
+
+
+// Values below are expressed in terms of possible power cap range
+// i.e. if min possible power cap is 100W and max is 250W, then 0.25 means 100W + 0.25 * (250W - 100W) = 137.5W
+float __cudampi__cpu_min_powercap = 0.0;
+float __cudampi__gpu_min_powercap = 0.0;
 
 int __cudampi_totaldevicecount = 0; // how many GPUs + CPUs (on all considered nodes)
 int __cudampi_totalgpudevicecount = 0; // how many GPUs in total (on all considered nodes)
@@ -121,6 +127,8 @@ static struct argp_option options[] = {
   { "cpu-power-scaling",                 's',  "SCALING FACTOR",    0, "Set the CPU power scaling factor" },
   { "initial-cpu-batch-size-scaling",    'f',  "SCALING FACTOR",    0, "Set initial scaling factor for CPU batch size (0 to disable)" },
   { "disable-dynamic-cpu-batch-scaling",  0,    0,                  0, "Disable dynamic CPU batch size scaling" },
+  { "cpu-min-powercap", 'x', "PART OF RANGE", 0, "Set minimum CPU power cap expressed as point on range from min to max" },
+  { "gpu-min-powercap", 'y', "PART OF RANGE", 0, "Set minimum GPU power cap expressed as point on range from min to max" },
   { 0 }
 };
 
@@ -316,6 +324,12 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state)
       break;
     case 0: // For --disable-dynamic-cpu-batch-scaling
       arguments->use_dynamic_scaling = 0;
+      break;
+    case 'x':
+      arguments->cpu_min_powercap = atof(arg);
+      break;
+    case 'y':
+      arguments->gpu_min_powercap = atof(arg);
       break;
     default:
       return ARGP_ERR_UNKNOWN;
@@ -1090,7 +1104,11 @@ void __cudampi__initializeMPI(int argc, char **argv) {
   log_message(LOG_INFO, "CPU Power Scaling                          : %f",   __cudampi__arguments.cpu_power_scaling);
   log_message(LOG_INFO, "Initial Cpu Batch Size Scaling Factor      : %d",   __cudampi__arguments.cpu_batch_scaling_factor);
   log_message(LOG_INFO, "Dynamic CPU Batch Size Scaling Enabled     : %d",   __cudampi__arguments.use_dynamic_scaling);
+  log_message(LOG_INFO, "Min CPU Power Cap                          : %f",   __cudampi__arguments.cpu_min_powercap);
+  log_message(LOG_INFO, "Min GPU Power Cap                          : %f",   __cudampi__arguments.gpu_min_powercap);
 
+  __cudampi__cpu_min_powercap = __cudampi__arguments.cpu_min_powercap;
+  __cudampi__gpu_min_powercap = __cudampi__arguments.gpu_min_powercap;
   __cudampi__dyanmicCpuBatchSizeScalingEnabled = __cudampi__arguments.use_dynamic_scaling;
   __cudampi__cpu_enabled = __cudampi__arguments.cpu_enabled;
   __cudampi__default_batch_size = __cudampi__arguments.batch_size;
@@ -1251,7 +1269,7 @@ void __cudampi__initializeMPI(int argc, char **argv) {
     __cudampi__devicePowerConfig[i].currentPower = -1; // initial value
     __cudampi__devicePowerConfig[i].deviceEnabled = 1;
     __cudampi__devicePowerConfig[i].powercapRange = __cudampi__perNodePowerCapRange[currentrank].gpuRange[currentGPU];
-    __cudampi__devicePowerConfig[i].minPowerCap = getPowerCapFromRange(__cudampi__devicePowerConfig[i].powercapRange.min, __cudampi__devicePowerConfig[i].powercapRange.max, GPU_MIN_POWERCAP);
+    __cudampi__devicePowerConfig[i].minPowerCap = getPowerCapFromRange(__cudampi__devicePowerConfig[i].powercapRange.min, __cudampi__devicePowerConfig[i].powercapRange.max, __cudampi__gpu_min_powercap);
 
     currentGPU++;
 
@@ -1273,7 +1291,7 @@ void __cudampi__initializeMPI(int argc, char **argv) {
     __cudampi__devicePowerConfig[i].currentPower = -1; // initial value
     __cudampi__devicePowerConfig[i].deviceEnabled = 1;
     __cudampi__devicePowerConfig[i].powercapRange = __cudampi__perNodePowerCapRange[currentrank].cpuRange;
-    __cudampi__devicePowerConfig[i].minPowerCap = getPowerCapFromRange(__cudampi__devicePowerConfig[i].powercapRange.min, __cudampi__devicePowerConfig[i].powercapRange.max, CPU_MIN_POWERCAP);
+    __cudampi__devicePowerConfig[i].minPowerCap = getPowerCapFromRange(__cudampi__devicePowerConfig[i].powercapRange.min, __cudampi__devicePowerConfig[i].powercapRange.max, __cudampi__cpu_min_powercap);
 
     __cudampi_targetMPIrankfordevice[i] = currentrank;
     currentrank ++;
@@ -1384,7 +1402,7 @@ void __cudampi__initializeMPI(int argc, char **argv) {
   }
 
   // apply changes to all powercaps
-  if (__cudampi__powercapStrategy == CONTINOUS_EQUAL || __cudampi__powercapStrategy == EDP_GRADIENT_OPT) {
+  if (__cudampi__isglobalpowerlimitset && (__cudampi__powercapStrategy == CONTINOUS_EQUAL || __cudampi__powercapStrategy == EDP_GRADIENT_OPT)) {
     for (int i = 0; i < __cudampi_totaldevicecount; i++) {
       if (__cudampi__devicePowerConfig[i].currentPowerCap != -1) {
         setDevicePowerCap(i);
