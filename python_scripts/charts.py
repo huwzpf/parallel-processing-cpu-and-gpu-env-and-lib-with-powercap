@@ -1,8 +1,10 @@
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 import pandas as pd
-from models import ExperimentResult
+from models import ExperimentResult, MultipleRunResult
 import numpy as np
+from collections import defaultdict
+from pathlib import Path
 
 
 MARKER_SIZE = 3
@@ -10,6 +12,117 @@ CAPSIZE = 3     # length of horizontal line of std deviation
 CAPTHICK = 1    # thickness of horizontal line of std deviation
 ELINEWIDTH = 1  # thickness of vertical line of std deviation
 
+class ContinousPowerCappingResult:
+    def __init__(self, run: MultipleRunResult):
+        self.cpu_min_powercap = run.parameters.cpu_min_powercap
+        self.gpu_min_powercap = run.parameters.gpu_min_powercap
+        self.execution_duration = run.average("execution_duration")
+        self.energy_used = run.average("energy_used")
+        self.edp = self.execution_duration * self.energy_used 
+
+def min_powercap_heatmap(experiment_result: ExperimentResult):
+    """
+    For each distinct 'parameters.powercap' in experiment_result.experiment_result:
+      - gather results (converted to ContinousPowerCappingResult)
+      - create heatmaps for energy_used, edp, execution_duration
+      - highlight 3 smallest values
+      - save each heatmap as '<out_dir>/powercap_<VALUE>_<METRIC>.png'
+    """
+    out_dir = "plots"
+    Path(out_dir).mkdir(parents=True, exist_ok=True)
+    powercaps = [mr.parameters.powercap for mr in experiment_result.experiment_result]
+    
+    for powercap in set(powercaps):
+        results = [
+            ContinousPowerCappingResult(r)
+            for r in experiment_result.experiment_result
+            if r.parameters.powercap == powercap
+        ]
+        
+        # Extract rows (cpu, gpu, metrics)
+        rows = []
+        for res in results:
+            rows.append({
+                "cpu_min_powercap": getattr(res, "cpu_min_powercap"),
+                "gpu_min_powercap": getattr(res, "gpu_min_powercap"),
+                "energy_used": getattr(res, "energy_used"),
+                "edp": getattr(res, "edp"),
+                "execution_duration": getattr(res, "execution_duration"),
+            })
+
+        # Aggregate duplicates by (gpu, cpu) -> mean of metrics
+        bucket = defaultdict(lambda: defaultdict(list))
+        for row in rows:
+            key = (row["gpu_min_powercap"], row["cpu_min_powercap"])
+            for metric in ("energy_used", "edp", "execution_duration"):
+                bucket[key][metric].append(row[metric])
+
+        grid_means = {
+            key: {m: float(np.mean(vals)) if len(vals) else np.nan
+                  for m, vals in metric_map.items()}
+            for key, metric_map in bucket.items()
+        }
+
+        # Sorted axes
+        cpu_vals = sorted({cpu for (_, cpu) in grid_means.keys()})
+        gpu_vals = sorted({gpu for (gpu, _) in grid_means.keys()})
+        if not cpu_vals or not gpu_vals:
+            continue
+
+        # helper: make 2D matrix
+        def to_grid(metric: str):
+            grid = np.full((len(gpu_vals), len(cpu_vals)), np.nan, dtype=float)
+            for i, g in enumerate(gpu_vals):
+                for j, c in enumerate(cpu_vals):
+                    val = grid_means.get((g, c), {}).get(metric, np.nan)
+                    grid[i, j] = val
+            return grid
+
+        metrics = ("energy_used", "edp", "execution_duration")
+
+        def fmt_powercap(val):
+            try:
+                if isinstance(val, (int, np.integer)) or (isinstance(val, float) and val.is_integer()):
+                    return f"{int(val)}"
+                return f"{val}".replace(".", "_")
+            except Exception:
+                return str(val).replace(" ", "_")
+
+        pc_str = fmt_powercap(powercap)
+
+        for metric in metrics:
+            grid = to_grid(metric)
+
+            # Create figure
+            plt.figure(figsize=(6, 4))
+            im = plt.imshow(grid, aspect="auto", origin="upper")
+            plt.title(f"{metric.replace('_', ' ').title()} @ powercap {powercap}")
+            plt.xlabel("CPU Min Powercap")
+            plt.ylabel("GPU Min Powercap")
+            plt.xticks(range(len(cpu_vals)), cpu_vals, rotation=45, ha="right")
+            plt.yticks(range(len(gpu_vals)), gpu_vals)
+            plt.colorbar(im)
+
+            # ---- Highlight 3 smallest values ----
+            flat = [(grid[i, j], i, j)
+                    for i in range(len(gpu_vals))
+                    for j in range(len(cpu_vals))
+                    if not np.isnan(grid[i, j])]
+            flat.sort(key=lambda x: x[0])
+            for val, i, j in flat[:3]:
+                plt.scatter(j, i, s=120, facecolors='none', edgecolors='red', linewidths=2)
+                plt.text(j, i, f"{val:.2f}",
+                         ha="center", va="center",
+                         color="white", fontsize=5, weight="bold")
+
+            # Save
+            filename = Path(out_dir) / f"powercap_{pc_str}_{metric}.png"
+            plt.tight_layout()
+            plt.savefig(filename, dpi=200)
+            plt.close()
+
+
+   
 
 def time_powercap_scatter(experiment_result: ExperimentResult):
     # Extracting data

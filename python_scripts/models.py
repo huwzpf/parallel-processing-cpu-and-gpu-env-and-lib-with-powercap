@@ -36,6 +36,8 @@ class RunParameters:
     powercap: int | None
     cpu_power_scaling: float | None
     initial_cpu_batch_size_scaling: int
+    cpu_min_powercap: float
+    gpu_min_powercap: float
 
 
 @dataclass

@@ -15,7 +15,9 @@ def get_arguments(run_parameters: RunParameters):
     powercap_arg = str(run_parameters.powercap) if run_parameters.powercap else "0"
     cpu_power_scaling_arg = str(run_parameters.cpu_power_scaling) if run_parameters.cpu_power_scaling else "0"
     initial_cpu_batch_size_scaling = str(run_parameters.initial_cpu_batch_size_scaling) if run_parameters.initial_cpu_batch_size_scaling else "0"
-    return f"--cpu-enabled={cpu_enabled_arg} --number-of-streams={number_of_streams_arg} --batch-size={batch_size_arg} --powercap={powercap_arg} --cpu-power-scaling={cpu_power_scaling_arg} --initial-cpu-batch-size-scaling={initial_cpu_batch_size_scaling}"
+    cpu_min_powercap = str(run_parameters.cpu_min_powercap) if run_parameters.cpu_min_powercap else "0"
+    gpu_min_powercap = str(run_parameters.gpu_min_powercap) if run_parameters.gpu_min_powercap else "0"
+    return f"--cpu-enabled={cpu_enabled_arg} --number-of-streams={number_of_streams_arg} --batch-size={batch_size_arg} --powercap={powercap_arg} --cpu-power-scaling={cpu_power_scaling_arg} --initial-cpu-batch-size-scaling={initial_cpu_batch_size_scaling} --cpu-min-powercap={cpu_min_powercap} --gpu-min-powercap={gpu_min_powercap}"
 
 def single_app_run(run_parameters: RunParameters) -> SingleRunResult:
     os.chdir(Path.home() / Path("parallel-processing-cpu-and-gpu-env-and-lib-with-powercap/cudampilib"))
