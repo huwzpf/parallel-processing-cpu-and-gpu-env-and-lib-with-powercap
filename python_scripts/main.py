@@ -74,6 +74,8 @@ def experiment_powercap_opt(description: str, app_name: str, file_path: str | os
         initial_cpu_batch_size_scaling=0,
         cpu_enabled=True
     )
+    # Iterate also over CPU power cap time window (0.5s, 1s, 2s)
+    time_windows_us = [500_000, 1_000_000, 2_000_000]
     experiment = Experiment(
         description=description,
         experiment_configurations=[
@@ -81,10 +83,12 @@ def experiment_powercap_opt(description: str, app_name: str, file_path: str | os
                 powercap=powercap,
                 cpu_min_powercap=cpu_min,
                 gpu_min_powercap=gpu_min,
+                cpu_time_window_us=tw_us,
             )
             for powercap in [500, 1000, 1500, 2000, 2500, 3000]
             for cpu_min in [0.1, 0.3, 0.5, 0.7, 0.9]
             for gpu_min in [0.1, 0.3, 0.5, 0.7, 0.9]
+            for tw_us in time_windows_us
         ]
     )
     run_experiment(experiment_file_name=file_path, experiment=experiment, number_of_runs=NUMBER_OF_RUNS)

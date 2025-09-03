@@ -36,8 +36,11 @@ class RunParameters:
     powercap: int | None
     cpu_power_scaling: float | None
     initial_cpu_batch_size_scaling: int
-    cpu_min_powercap: float
-    gpu_min_powercap: float
+    # For CONTINOUS_EQUAL: fractions of range; optional with sensible defaults
+    cpu_min_powercap: float | None = None
+    gpu_min_powercap: float | None = None
+    # Optional CPU time window for power capping (microseconds)
+    cpu_time_window_us: int | None = None
 
 
 @dataclass
