@@ -25,6 +25,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OU
 
 #include "cudampicommon.h"
 #include "cudampilib.h"
+#include "powercap_config.h"
 
 // int __cudampi__GPUcountpernode=1;
 
@@ -1114,7 +1115,20 @@ void __cudampi__initializeMPI(int argc, char **argv) {
   __cudampi__default_batch_size = __cudampi__arguments.batch_size;
 
   __cudampi__cpu_power_scaling = __cudampi__arguments.cpu_power_scaling;
-  
+
+  // Load power capping configuration from file if available
+  powercap_config_t file_config;
+  if (load_powercap_config("powercap.conf", &file_config) == 0) {
+    __cudampi__powercapStrategy = file_config.strategy;
+    if (file_config.strategy == CONTINOUS_EQUAL) {
+      __cudampi__cpu_min_powercap = file_config.cpu_min_powercap;
+      __cudampi__gpu_min_powercap = file_config.gpu_min_powercap;
+    } else if (file_config.strategy == EDP_GRADIENT_OPT) {
+      __cudampi__globalpowerlimit = file_config.start_powercap;
+      __cudampi__isglobalpowerlimitset = 1;
+    }
+  }
+
   if (__cudampi__cpu_enabled == 0)
   {
     log_message(LOG_INFO, "Cpu disabled. Setting CPU power scaling to 0.0");
@@ -1149,7 +1163,7 @@ void __cudampi__initializeMPI(int argc, char **argv) {
     __cudampi__setglobalpowerlimit(__cudampi__arguments.powercap);
   }
 
-  if (__cudampi__powercapStrategy == EDP_GRADIENT_OPT) {
+  if (__cudampi__powercapStrategy == EDP_GRADIENT_OPT && !__cudampi__isglobalpowerlimitset) {
     __cudampi__isglobalpowerlimitset = 1;
     __cudampi__globalpowerlimit = 0;
   }
