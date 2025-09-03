@@ -185,7 +185,6 @@ int main(int argc, char **argv)
 
     } while (!finish);
 
-    #pragma omp barrier
     __cudampi__deviceSynchronize();
 
     __cudampi__streamDestroy(stream1);

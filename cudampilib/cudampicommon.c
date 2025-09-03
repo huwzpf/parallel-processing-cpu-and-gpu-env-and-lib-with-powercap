@@ -246,6 +246,7 @@ int socketSetGpuPowerCap(int gpuid, float powerCap)
 
 void __cudampi__setGpuPowerCap(int gpuid, float powerCap)
 {
+  log_message(LOG_INFO, "Setting GPU%d power cap to %f W with time window", gpuid, powerCap);
   if (socketSetGpuPowerCap(gpuid, powerCap) == 1) {
     nvmlSetGpuPowerCap(gpuid, powerCap);
   }
