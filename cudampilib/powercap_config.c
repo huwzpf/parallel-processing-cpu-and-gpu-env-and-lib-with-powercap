@@ -19,9 +19,9 @@ int load_powercap_config(const char *path, powercap_config_t *config) {
 
     // Default values
     config->strategy = BINARY_GREEDY;
-    config->cpu_min_powercap = 0.0f;
-    config->gpu_min_powercap = 0.0f;
-    config->start_powercap = START_POWERCAP_FOR_GRAD_OPT;
+    config->cpu_min_powercap = 0.0;
+    config->gpu_min_powercap = 0.0;
+    config->start_powercap = 0.5;
 
     FILE *f = fopen(path, "r");
     if (!f) {

@@ -104,20 +104,20 @@ powercapRange_t __cudampi__getCpuPowerCapRange()
   file = fopen("/sys/class/powercap/intel-rapl:0/constraint_0_time_window_us", "r");
   if (file == NULL) {
     log_message(LOG_ERROR, "Failed to open constraint_0_time_window_us file for reading");
-    range.timeWindowUs = -1;
+    range.defaultTimeWindowUs = -1;
     return range;
   }
 
   if (fscanf(file, "%llu", &timeWindow_us) != 1) {
     log_message(LOG_ERROR, "Failed to read time window value");
     fclose(file);
-    range.timeWindowUs = -1;
+    range.defaultTimeWindowUs = -1;
     return range;
   }
 
   fclose(file);
 
-  range.timeWindowUs = timeWindow_us;
+  range.defaultTimeWindowUs = timeWindow_us;
 
   return range;
 }
@@ -246,7 +246,6 @@ int socketSetGpuPowerCap(int gpuid, float powerCap)
 
 void __cudampi__setGpuPowerCap(int gpuid, float powerCap)
 {
-  log_message(LOG_INFO, "Setting GPU%d power cap to %f W with time window", gpuid, powerCap);
   if (socketSetGpuPowerCap(gpuid, powerCap) == 1) {
     nvmlSetGpuPowerCap(gpuid, powerCap);
   }

@@ -9,12 +9,13 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 */
+#ifndef CUDAMPILIB_H
+#define CUDAMPILIB_H
+
 #include "cudampi.h"
 #include <cuda_runtime.h>
 #include <mpi.h>
 
-
-#define START_POWERCAP_FOR_GRAD_OPT 1.0
 
 typedef enum {
   CONTINOUS_EQUAL,
@@ -121,3 +122,5 @@ cudaError_t __cudampi__memcpy(void *dst, const void *src, size_t count, enum cud
 void __cudampi__kernelInStream(void *devPtr, cudaStream_t stream, unsigned long long id);
 
 void __cudampi__kernel(void *devPtr, unsigned long long id);
+
+#endif

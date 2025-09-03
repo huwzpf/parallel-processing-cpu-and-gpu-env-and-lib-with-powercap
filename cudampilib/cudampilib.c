@@ -128,8 +128,6 @@ static struct argp_option options[] = {
   { "cpu-power-scaling",                 's',  "SCALING FACTOR",    0, "Set the CPU power scaling factor" },
   { "initial-cpu-batch-size-scaling",    'f',  "SCALING FACTOR",    0, "Set initial scaling factor for CPU batch size (0 to disable)" },
   { "disable-dynamic-cpu-batch-scaling",  0,    0,                  0, "Disable dynamic CPU batch size scaling" },
-  { "cpu-min-powercap", 'x', "PART OF RANGE", 0, "Set minimum CPU power cap expressed as point on range from min to max" },
-  { "gpu-min-powercap", 'y', "PART OF RANGE", 0, "Set minimum GPU power cap expressed as point on range from min to max" },
   { 0 }
 };
 
@@ -1105,11 +1103,7 @@ void __cudampi__initializeMPI(int argc, char **argv) {
   log_message(LOG_INFO, "CPU Power Scaling                          : %f",   __cudampi__arguments.cpu_power_scaling);
   log_message(LOG_INFO, "Initial Cpu Batch Size Scaling Factor      : %d",   __cudampi__arguments.cpu_batch_scaling_factor);
   log_message(LOG_INFO, "Dynamic CPU Batch Size Scaling Enabled     : %d",   __cudampi__arguments.use_dynamic_scaling);
-  log_message(LOG_INFO, "Min CPU Power Cap                          : %f",   __cudampi__arguments.cpu_min_powercap);
-  log_message(LOG_INFO, "Min GPU Power Cap                          : %f",   __cudampi__arguments.gpu_min_powercap);
 
-  __cudampi__cpu_min_powercap = __cudampi__arguments.cpu_min_powercap;
-  __cudampi__gpu_min_powercap = __cudampi__arguments.gpu_min_powercap;
   __cudampi__dyanmicCpuBatchSizeScalingEnabled = __cudampi__arguments.use_dynamic_scaling;
   __cudampi__cpu_enabled = __cudampi__arguments.cpu_enabled;
   __cudampi__default_batch_size = __cudampi__arguments.batch_size;
@@ -1124,9 +1118,30 @@ void __cudampi__initializeMPI(int argc, char **argv) {
       __cudampi__cpu_min_powercap = file_config.cpu_min_powercap;
       __cudampi__gpu_min_powercap = file_config.gpu_min_powercap;
     } else if (file_config.strategy == EDP_GRADIENT_OPT) {
-      __cudampi__globalpowerlimit = file_config.start_powercap;
+      __cudampi__globalpowerlimit = 0;
       __cudampi__isglobalpowerlimitset = 1;
     }
+  }
+  else {
+    __cudampi__powercapStrategy = BINARY_GREEDY;
+  }
+
+  // Print selected powercap strategy and, for continuous strategy, print min powercap parts
+  switch (__cudampi__powercapStrategy) {
+    case BINARY_GREEDY:
+      log_message(LOG_INFO, "Powercap strategy: BINARY_GREEDY");
+      break;
+    case CONTINOUS_EQUAL:
+      log_message(LOG_INFO, "Powercap strategy: CONTINOUS_EQUAL");
+      log_message(LOG_INFO, "CPU min powercap (part of range): %f", __cudampi__cpu_min_powercap);
+      log_message(LOG_INFO, "GPU min powercap (part of range): %f", __cudampi__gpu_min_powercap);
+      break;
+    case EDP_GRADIENT_OPT:
+      log_message(LOG_INFO, "Powercap strategy: EDP_GRADIENT_OPT");
+      break;
+    default:
+      log_message(LOG_INFO, "Powercap strategy: UNKNOWN (%d)", __cudampi__powercapStrategy);
+      break;
   }
 
   if (__cudampi__cpu_enabled == 0)
@@ -1161,11 +1176,6 @@ void __cudampi__initializeMPI(int argc, char **argv) {
   if (__cudampi__arguments.powercap > 0) {
     log_message(LOG_INFO, "\nSetting power limit=%d\n", __cudampi__arguments.powercap);
     __cudampi__setglobalpowerlimit(__cudampi__arguments.powercap);
-  }
-
-  if (__cudampi__powercapStrategy == EDP_GRADIENT_OPT && !__cudampi__isglobalpowerlimitset) {
-    __cudampi__isglobalpowerlimitset = 1;
-    __cudampi__globalpowerlimit = 0;
   }
 
   // fetch information about the rank and number of processes
@@ -1461,7 +1471,7 @@ void __cudampi__terminateMPI() {
 
   if (__cudampi__isglobalpowerlimitset) {
     // Reset CPU power cap
-    __cudampi__setCpuPowerCap(__cudampi__localPowerCapRange.cpuRange.defaultPowerCap, __cudampi__localPowerCapRange.cpuRange.timeWindowUs);
+    __cudampi__setCpuPowerCap(__cudampi__localPowerCapRange.cpuRange.defaultPowerCap, __cudampi__localPowerCapRange.cpuRange.defaultTimeWindowUs);
     // Reset GPU power caps
     for (int i = 0; i < __cudampi__localGpuDeviceCount; i++) {
       __cudampi__setGpuPowerCap(i, __cudampi__localPowerCapRange.gpuRange[i].defaultPowerCap);

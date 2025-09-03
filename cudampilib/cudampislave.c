@@ -1217,7 +1217,7 @@ int main(int argc, char **argv) {
   }
   
   // Reset CPU power cap
-  __cudampi__setCpuPowerCap(__cudampi__localPowerCapRange.cpuRange.defaultPowerCap, __cudampi__localPowerCapRange.cpuRange.timeWindowUs);
+  __cudampi__setCpuPowerCap(__cudampi__localPowerCapRange.cpuRange.defaultPowerCap, __cudampi__localPowerCapRange.cpuRange.defaultTimeWindowUs);
   // Reset GPU power caps
   for (int i = 0; i < __cudampi__localGpuDeviceCount; i++) {
     __cudampi__setGpuPowerCap(i, __cudampi__localPowerCapRange.gpuRange[i].defaultPowerCap);
