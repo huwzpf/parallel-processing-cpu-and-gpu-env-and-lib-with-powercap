@@ -11,6 +11,7 @@ typedef struct {
     float cpu_min_powercap;      // minimum CPU power cap (for continuous strategy)
     float gpu_min_powercap;      // minimum GPU power cap (for continuous strategy)
     float start_powercap;        // starting power cap (for gradient optimization)
+    unsigned long long cpu_time_window_us; // CPU power cap time window (microseconds)
 } powercap_config_t;
 
 // Loads configuration from a simple key=value file.

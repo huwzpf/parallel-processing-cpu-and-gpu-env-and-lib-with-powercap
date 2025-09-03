@@ -20,7 +20,7 @@ typedef struct {
     float min;
     float max;
     float defaultPowerCap;
-    unsigned long long timeWindowUs; // Used just for CPU, but for now, let's keep it for simplicity
+    unsigned long long defaultTimeWindowUs; // Used just for CPU, but for now, let's keep it for simplicity
 } powercapRange_t;
 
 typedef struct 

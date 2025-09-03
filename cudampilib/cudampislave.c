@@ -22,7 +22,8 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OU
 #define CPU_STREAM_FOR_GPU_RESPONSES CPU_STREAMS_SUPPORTED + omp_get_thread_num()
 // 4 GB per GPU seems reasonable
 #define INITIAL_GPU_BUFFER_SIZE 4 * 1024 * 1024 * 1024UL
-#define DEFAULT_TIME_WINDOW_US 1000000 // 1 second
+// CPU time window (microseconds) will be received from master at init
+unsigned long long __cudampi__cpu_time_window_us = 1000000ULL; // default 1s
 
 #define ENABLE_LOGGING
 #define MPI_LOGGING
@@ -523,6 +524,8 @@ int main(int argc, char **argv) {
 
   MPI_Bcast(&__cudampi__cpu_enabled, 1, MPI_INT, 0, MPI_COMM_WORLD);
   MPI_Bcast(&__cudampi__cpu_power_scaling, 1, MPI_FLOAT, 0, MPI_COMM_WORLD);
+  // Receive CPU power cap time window (microseconds) from master
+  MPI_Bcast(&__cudampi__cpu_time_window_us, 1, MPI_UNSIGNED_LONG_LONG, 0, MPI_COMM_WORLD);
 
   if (__cudampi__cpu_enabled){
       assert(__cudampi__cpu_power_scaling > 0.0 && __cudampi__cpu_power_scaling <= 1.0);
@@ -944,7 +947,7 @@ int main(int argc, char **argv) {
           float powerCap;
           MPI_Recv(&powerCap, 1, MPI_FLOAT, 0, __cudampi__CONFIGUREPOWERCAP, __cudampi__communicators[omp_get_thread_num()], &status);
 
-          __cudampi__setCpuPowerCap(powerCap, DEFAULT_TIME_WINDOW_US);
+          __cudampi__setCpuPowerCap(powerCap, __cudampi__cpu_time_window_us);
         }
         if (status.MPI_TAG == __cudampi__CPUMALLOCREQ) {
           unsigned long rdata;

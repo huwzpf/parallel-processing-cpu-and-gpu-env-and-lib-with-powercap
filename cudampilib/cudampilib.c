@@ -49,6 +49,9 @@ powercapStrategy_t __cudampi__powercapStrategy = BINARY_GREEDY;
 float __cudampi__cpu_min_powercap = 0.0;
 float __cudampi__gpu_min_powercap = 0.0;
 
+// CPU power cap time window (microseconds), broadcast to slaves
+unsigned long long __cudampi__cpu_time_window_us = 1000000ULL; // default 1s
+
 int __cudampi_totaldevicecount = 0; // how many GPUs + CPUs (on all considered nodes)
 int __cudampi_totalgpudevicecount = 0; // how many GPUs in total (on all considered nodes)
 int __cudampi_totalcpudevicecount = 0; // how many CPUs in total (on all considered nodes)
@@ -1121,11 +1124,14 @@ void __cudampi__initializeMPI(int argc, char **argv) {
       __cudampi__globalpowerlimit = 0;
       __cudampi__isglobalpowerlimitset = 1;
     }
+    // Always take configured CPU time window (us)
+    __cudampi__cpu_time_window_us = file_config.cpu_time_window_us;
   }
   else {
     __cudampi__powercapStrategy = BINARY_GREEDY;
   }
 
+  log_message(LOG_INFO, "CPU power cap time window: %lld", __cudampi__cpu_time_window_us);
   // Print selected powercap strategy and, for continuous strategy, print min powercap parts
   switch (__cudampi__powercapStrategy) {
     case BINARY_GREEDY:
@@ -1216,6 +1222,8 @@ void __cudampi__initializeMPI(int argc, char **argv) {
 
   MPI_Bcast(&__cudampi__cpu_enabled, 1, MPI_INT, 0, MPI_COMM_WORLD);
   MPI_Bcast(&__cudampi__cpu_power_scaling, 1, MPI_FLOAT, 0, MPI_COMM_WORLD);
+  // Broadcast CPU time window (us) so slaves use consistent value
+  MPI_Bcast(&__cudampi__cpu_time_window_us, 1, MPI_UNSIGNED_LONG_LONG, 0, MPI_COMM_WORLD);
 
   MPI_Allgather(&__cudampi__localGpuDeviceCount, 1, MPI_INT, __cudampi__GPUcountspernode, 1, MPI_INT, MPI_COMM_WORLD);
 

@@ -22,6 +22,8 @@ int load_powercap_config(const char *path, powercap_config_t *config) {
     config->cpu_min_powercap = 0.0;
     config->gpu_min_powercap = 0.0;
     config->start_powercap = 0.5;
+    // Default CPU time window: 1 second (microseconds)
+    config->cpu_time_window_us = 1000000ULL;
 
     FILE *f = fopen(path, "r");
     if (!f) {
@@ -52,6 +54,9 @@ int load_powercap_config(const char *path, powercap_config_t *config) {
                 config->gpu_min_powercap = (float)atof(value);
             } else if (strcmp(key, "start_powercap") == 0) {
                 config->start_powercap = (float)atof(value);
+            } else if (strcmp(key, "cpu_time_window_us") == 0) {
+                // microseconds
+                config->cpu_time_window_us = (unsigned long long)strtoull(value, NULL, 10);
             }
             // Unknown keys are ignored to keep parser extendable
         }
@@ -59,4 +64,3 @@ int load_powercap_config(const char *path, powercap_config_t *config) {
     fclose(f);
     return 0;
 }
-
