@@ -477,6 +477,7 @@ int __cudampi__selectpowercap_equal() { // adopts a greedy strategy for selectin
   float curperfpower;
   int anydeviceenabled = 0;
 
+  log_message(LOG_INFO, "---------- Executing equal power capping algorithm ! ---------- ");
   log_message(LOG_DEBUG, "\nBefore setting power cap");
 
   omp_set_lock(&deviceselectionlock);
@@ -836,7 +837,7 @@ int __cudampi__selectdevicesforpowerlimit_greedy() { // adopts a greedy strategy
   float curperfpower;
   int anydeviceenabled = 0;
 
-  log_message(LOG_DEBUG, "\nBefore setting power cap");
+  log_message(LOG_INFO, "---------- Executing greedy power capping algorithm ! ---------- ");
   fflush(stdout);
 
   omp_set_lock(&deviceselectionlock);

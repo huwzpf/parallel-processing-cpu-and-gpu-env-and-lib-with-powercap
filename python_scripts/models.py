@@ -36,6 +36,7 @@ class RunParameters:
     powercap: int | None
     cpu_power_scaling: float | None
     initial_cpu_batch_size_scaling: int
+    strategy: str | None  # "CONTINOUS_EQUAL", "BINARY_GREEDY", "EDP_GRADIENT_OPT"
     # For CONTINOUS_EQUAL: fractions of range; optional with sensible defaults
     cpu_min_powercap: float | None = None
     gpu_min_powercap: float | None = None

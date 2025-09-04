@@ -89,7 +89,11 @@ int main(int argc, char **argv)
 
   gettimeofday(&start, NULL);
 
-  #pragma omp parallel num_threads(alldevicescount)
+  // Measure average period between __cudampi__deviceSynchronize() calls in the main loop
+  long long total_sync_intervals = 0;      // aggregated across threads
+  long long total_sync_sum_us = 0;         // aggregated across threads (microseconds)
+
+  #pragma omp parallel num_threads(alldevicescount) reduction(+:total_sync_intervals,total_sync_sum_us)
   {
 
     __cudampi__batch_pointer batch_pointer;
@@ -178,6 +182,12 @@ int main(int argc, char **argv)
       __cudampi__memcpyAsync(devPtr2 + sizeof(void *), &devPtrb2, sizeof(void *), cudaMemcpyHostToDevice, stream2);
       __cudampi__memcpyAsync(devPtr2 + 2 * sizeof(void *), &devPtrc2, sizeof(void *), cudaMemcpyHostToDevice, stream2);
     }
+    // Local trackers for sync call periods (per-thread)
+    struct timeval last_sync_time;
+    int has_last_sync_time = 0;
+    long long local_sync_intervals = 0;
+    long long local_sync_sum_us = 0;
+
     do 
     {
       batch_pointer = __cudampi__getnextchunkindex(&globalcounter, VECTORSIZE);
@@ -215,11 +225,28 @@ int main(int argc, char **argv)
       if (privatecounter % 2 == 0)
       {
         __cudampi__deviceSynchronize();
+
+        // Record period between consecutive deviceSynchronize() calls inside the main loop
+        struct timeval now_sync;
+        gettimeofday(&now_sync, NULL);
+        if (has_last_sync_time)
+        {
+          long long delta_us = (now_sync.tv_sec - last_sync_time.tv_sec) * 1000000LL +
+                               (now_sync.tv_usec - last_sync_time.tv_usec);
+          local_sync_sum_us += delta_us;
+          local_sync_intervals += 1;
+        }
+        last_sync_time = now_sync;
+        has_last_sync_time = 1;
       }
 
     } while (!finish);
 
     __cudampi__deviceSynchronize();
+
+    // Contribute local stats to the reduction totals
+    total_sync_intervals += local_sync_intervals;
+    total_sync_sum_us += local_sync_sum_us;
 
     __cudampi__streamDestroy(stream1);
     __cudampi__free(devPtr);
@@ -238,6 +265,17 @@ int main(int argc, char **argv)
   }
   gettimeofday(&stop, NULL);
   log_message(LOG_INFO, "Main elapsed time=%f\n", (double)((stop.tv_sec - start.tv_sec) + (double)(stop.tv_usec - start.tv_usec) / 1000000.0));
+
+  if (total_sync_intervals > 0)
+  {
+    double avg_us = (double) total_sync_sum_us / (double) total_sync_intervals;
+    log_message(LOG_INFO, "Average period between deviceSynchronize() calls: %.3f ms over %lld intervals\n",
+                avg_us / 1000.0, total_sync_intervals);
+  }
+  else
+  {
+    log_message(LOG_INFO, "No deviceSynchronize() pairs observed inside main loop.\n");
+  }
 
   __cudampi__terminateMPI();
   // save_vector_output_double(vectorc, VECTORSIZE, "vecmaxdiv_logs_cpugpuasyncfull.log", "CPUGPUASYNC");

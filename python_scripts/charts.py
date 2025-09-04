@@ -20,23 +20,79 @@ class ContinousPowerCappingResult:
         self.energy_used = run.average("energy_used")
         self.edp = self.execution_duration * self.energy_used 
 
-def min_powercap_heatmap(experiment_result: ExperimentResult):
+def min_powercap_heatmap(experiment_result: ExperimentResult, out_dir = "plots"):
     """
-    For each distinct 'parameters.powercap' in experiment_result.experiment_result:
+    Create heatmaps per (powercap, cpu_time_window_us) combination.
+    For each distinct pair in experiment_result.experiment_result:
       - gather results (converted to ContinousPowerCappingResult)
       - create heatmaps for energy_used, edp, execution_duration
-      - highlight 3 smallest values
-      - save each heatmap as '<out_dir>/powercap_<VALUE>_<METRIC>.png'
+      - annotate every grid cell with its exact value
+      - highlight only the single best (minimum) value with a red dot
+      - save as '<out_dir>/powercap_<PC>_cpu_time_window_us_<CTW>_<METRIC>.png'
     """
-    out_dir = "plots"
     Path(out_dir).mkdir(parents=True, exist_ok=True)
-    powercaps = [mr.parameters.powercap for mr in experiment_result.experiment_result]
-    
-    for powercap in set(powercaps):
+
+    # Collect (powercap, cpu_time_window_us) pairs
+    pc_ctw_pairs = [
+        (r.parameters.powercap, r.parameters.cpu_time_window_us)
+        for r in experiment_result.experiment_result
+    ]
+
+    # Helper for safe value formatting for filenames
+    def fmt_val(val):
+        try:
+            if val is None:
+                return "none"
+            if isinstance(val, (int, np.integer)) or (isinstance(val, float) and float(val).is_integer()):
+                return f"{int(val)}"
+            return f"{val}".replace(".", "_").replace(" ", "_")
+        except Exception:
+            return str(val).replace(" ", "_")
+
+    # Print best configuration (min EDP, min Energy) for each powercap across all cpu_time_window_us and min powercaps
+    from math import isnan
+    by_powercap = defaultdict(list)
+    for r in experiment_result.experiment_result:
+        pc = r.parameters.powercap
+        if pc is None:
+            continue
+        avg_time = r.average("execution_duration")
+        avg_energy = r.average("energy_used")
+        try:
+            edp_val = float(avg_time) * float(avg_energy)
+            energy_val = float(avg_energy)
+        except Exception:
+            edp_val = float('nan')
+            energy_val = float('nan')
+        by_powercap[pc].append({
+            "cpu_time_window_us": getattr(r.parameters, "cpu_time_window_us", None),
+            "cpu_min_powercap": getattr(r.parameters, "cpu_min_powercap", None),
+            "gpu_min_powercap": getattr(r.parameters, "gpu_min_powercap", None),
+            "edp": edp_val,
+            "energy": energy_val,
+        })
+
+    for pc in sorted(by_powercap.keys()):
+        cands = [c for c in by_powercap[pc] if not isnan(c["edp"]) and not isnan(c["energy"])]
+        if not cands:
+            continue
+        best_edp = min(cands, key=lambda c: c["edp"]) if cands else None
+        best_energy = min(cands, key=lambda c: c["energy"]) if cands else None
+        if best_edp:
+            print(
+                f"powercap={pc:<4} | min EDP = {best_edp['edp']:.2f}: (cpu_time_window_us={best_edp['cpu_time_window_us']}, cpu_min_powercap={best_edp['cpu_min_powercap']}, gpu_min_powercap={best_edp['gpu_min_powercap']})"
+            )
+        if best_energy:
+            print(
+                f"powercap={pc:<4} | min Energy = {best_energy['energy']:.2f}: (cpu_time_window_us={best_energy['cpu_time_window_us']}, cpu_min_powercap={best_energy['cpu_min_powercap']}, gpu_min_powercap={best_energy['gpu_min_powercap']})"
+            )
+
+    for powercap, cpu_time_window_us in sorted(set(pc_ctw_pairs)):
         results = [
             ContinousPowerCappingResult(r)
             for r in experiment_result.experiment_result
             if r.parameters.powercap == powercap
+            and getattr(r.parameters, "cpu_time_window_us", None) == cpu_time_window_us
         ]
         
         # Extract rows (cpu, gpu, metrics)
@@ -81,14 +137,11 @@ def min_powercap_heatmap(experiment_result: ExperimentResult):
         metrics = ("energy_used", "edp", "execution_duration")
 
         def fmt_powercap(val):
-            try:
-                if isinstance(val, (int, np.integer)) or (isinstance(val, float) and val.is_integer()):
-                    return f"{int(val)}"
-                return f"{val}".replace(".", "_")
-            except Exception:
-                return str(val).replace(" ", "_")
+            # Backward-compatible alias that uses fmt_val
+            return fmt_val(val)
 
-        pc_str = fmt_powercap(powercap)
+        pc_str = fmt_val(powercap)
+        ctw_str = fmt_val(cpu_time_window_us)
 
         for metric in metrics:
             grid = to_grid(metric)
@@ -96,27 +149,41 @@ def min_powercap_heatmap(experiment_result: ExperimentResult):
             # Create figure
             plt.figure(figsize=(6, 4))
             im = plt.imshow(grid, aspect="auto", origin="upper")
-            plt.title(f"{metric.replace('_', ' ').title()} @ powercap {powercap}")
+            plt.title(
+                f"{metric.replace('_', ' ').title()} @ powercap {powercap}, cpu_time_window_us {cpu_time_window_us}"
+            )
             plt.xlabel("CPU Min Powercap")
             plt.ylabel("GPU Min Powercap")
             plt.xticks(range(len(cpu_vals)), cpu_vals, rotation=45, ha="right")
             plt.yticks(range(len(gpu_vals)), gpu_vals)
             plt.colorbar(im)
 
-            # ---- Highlight 3 smallest values ----
-            flat = [(grid[i, j], i, j)
-                    for i in range(len(gpu_vals))
-                    for j in range(len(cpu_vals))
-                    if not np.isnan(grid[i, j])]
-            flat.sort(key=lambda x: x[0])
-            for val, i, j in flat[:3]:
-                plt.scatter(j, i, s=120, facecolors='none', edgecolors='red', linewidths=2)
-                plt.text(j, i, f"{val:.2f}",
-                         ha="center", va="center",
-                         color="white", fontsize=5, weight="bold")
+            # ---- Annotate all cells with exact values ----
+            nrows, ncols = grid.shape
+            for i in range(nrows):
+                for j in range(ncols):
+                    val = grid[i, j]
+                    label = "-" if np.isnan(val) else f"{val:.2f}"
+                    # Keep text above any markers for readability
+                    plt.text(j, i, label, ha="center", va="center", color="black", fontsize=6, zorder=3)
+
+            # ---- Highlight only the single best (minimum) value ----
+            flat = [
+                (grid[i, j], i, j)
+                for i in range(nrows)
+                for j in range(ncols)
+                if not np.isnan(grid[i, j])
+            ]
+            if flat:
+                best_val, bi, bj = min(flat, key=lambda x: x[0])
+                # Red filled dot on the best cell
+                plt.scatter(bj, bi, s=120, color='red', marker='o', zorder=2)
 
             # Save
-            filename = Path(out_dir) / f"powercap_{pc_str}_{metric}.png"
+            filename = (
+                Path(out_dir)
+                / f"powercap_{pc_str}_cpu_time_window_us_{ctw_str}_{metric}.png"
+            )
             plt.tight_layout()
             plt.savefig(filename, dpi=200)
             plt.close()
@@ -174,6 +241,15 @@ def time_powercap_scatter(experiment_result: ExperimentResult):
 
     plt.savefig(f'{experiment_result.experiment_result[0].parameters.app_name}_time_power_cap_nodes_{experiment_result.experiment_result[0].parameters.number_od_nodes}.png')
     plt.close()
+
+
+def print_avg_edp_energy_per_configuration(experiment_result: ExperimentResult):
+    for r in experiment_result.experiment_result:
+        avg_time = r.average("execution_duration")
+        avg_energy = r.average("energy_used")
+        edp = avg_time * avg_energy
+
+        print(f"powercap={r.parameters.powercap:<4} | avg_energy={avg_energy:.2f}, avg_edp={edp:.2f}")
 
 
 def time_batch_size_scatter(experiment_result: ExperimentResult):
