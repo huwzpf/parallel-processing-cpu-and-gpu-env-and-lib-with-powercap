@@ -150,13 +150,16 @@ powercapRange_t __cudampi__getGpuPowerCapRange(int gpuid)
   result = nvmlDeviceGetPowerManagementDefaultLimit(nvmlDevice, &defaultPower);
   if (result != NVML_SUCCESS) {
       log_message(LOG_ERROR, "Failed to get current power management limit: %s", nvmlErrorString(result));
+      range.min = -1;
+      range.max = -1;
       range.defaultPowerCap = -1;
-  } else {
-      range.defaultPowerCap = (float) defaultPower / 1000.0;
+      return range;
   }
+  range.defaultPowerCap = (float) defaultPower / 1000.0;
 
   range.min = (float)min / 1000.0;
-  range.max = (float)max / 1000.0;
+  //range.max = (float)max / 1000.0;
+  range.max = range.defaultPowerCap;
 
   return range;
 }

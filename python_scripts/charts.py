@@ -20,7 +20,7 @@ class ContinousPowerCappingResult:
         self.energy_used = run.average("energy_used")
         self.edp = self.execution_duration * self.energy_used 
 
-def min_powercap_heatmap(experiment_result: ExperimentResult, out_dir = "plots"):
+def min_powercap_heatmap_cpu_gpu(experiment_result: ExperimentResult, out_dir = "plots"):
     """
     Create heatmaps per (powercap, cpu_time_window_us) combination.
     For each distinct pair in experiment_result.experiment_result:
@@ -189,7 +189,135 @@ def min_powercap_heatmap(experiment_result: ExperimentResult, out_dir = "plots")
             plt.close()
 
 
-   
+def min_powercap_heatmap_gpu(experiment_result: ExperimentResult, out_dir: str = "plots"):
+    """
+    Create heatmaps over (powercap, gpu_min_powercap) pairs.
+    For each metric (energy_used, edp, execution_duration):
+      - aggregate duplicates by mean
+      - annotate each cell with its value
+      - highlight the single best (minimum) with a red dot
+      - save as '<out_dir>/gpu_powercap_gpu_min_powercap_<METRIC>.png'
+    """
+    Path(out_dir).mkdir(parents=True, exist_ok=True)
+
+    # Helper for safe value formatting in filenames
+    def fmt_val(val):
+        try:
+            if val is None:
+                return "none"
+            if isinstance(val, (int, np.integer)) or (isinstance(val, float) and float(val).is_integer()):
+                return f"{int(val)}"
+            return f"{val}".replace(".", "_").replace(" ", "_")
+        except Exception:
+            return str(val).replace(" ", "_")
+
+    # Collect all rows (filter to entries that have both powercap and gpu_min_powercap)
+    rows = []
+    for r in experiment_result.experiment_result:
+        pc = getattr(r.parameters, "powercap", None)
+        gmin = getattr(r.parameters, "gpu_min_powercap", None)
+        if pc is None or gmin is None:
+            continue
+        avg_time = r.average("execution_duration")
+        avg_energy = r.average("energy_used")
+        rows.append({
+            "powercap": pc,
+            "gpu_min_powercap": gmin,
+            "energy_used": float(avg_energy),
+            "execution_duration": float(avg_time),
+            "edp": float(avg_time) * float(avg_energy),
+        })
+
+    if not rows:
+        return
+
+    # Aggregate duplicates by (powercap, gpu_min_powercap) -> mean of metrics
+    bucket = defaultdict(lambda: defaultdict(list))
+    for row in rows:
+        key = (row["powercap"], row["gpu_min_powercap"])  # (pc, gmin)
+        for metric in ("energy_used", "edp", "execution_duration"):
+            bucket[key][metric].append(row[metric])
+
+    grid_means = {
+        key: {m: float(np.mean(vals)) if len(vals) else np.nan
+              for m, vals in metric_map.items()}
+        for key, metric_map in bucket.items()
+    }
+
+    # Sorted axes
+    pc_vals = sorted({pc for (pc, _) in grid_means.keys()})
+    gmin_vals = sorted({gmin for (_, gmin) in grid_means.keys()})
+    if not pc_vals or not gmin_vals:
+        return
+
+    # Print best configuration (min EDP, min Energy) per powercap over gpu_min_powercap
+    from math import isnan
+    for pc in pc_vals:
+        # Collect candidates for this powercap across all gpu_min_powercap values
+        cands = []
+        for g in gmin_vals:
+            vals = grid_means.get((pc, g), {})
+            edp_val = vals.get("edp", np.nan)
+            energy_val = vals.get("energy_used", np.nan)
+            if not (isinstance(edp_val, float) and isnan(edp_val)) and not (isinstance(energy_val, float) and isnan(energy_val)):
+                cands.append({"gpu_min_powercap": g, "edp": edp_val, "energy": energy_val})
+        if not cands:
+            continue
+        # Best by EDP and by Energy
+        best_edp = min([c for c in cands if not isnan(c["edp"])], key=lambda c: c["edp"], default=None)
+        best_energy = min([c for c in cands if not isnan(c["energy"])], key=lambda c: c["energy"], default=None)
+        if best_edp is not None:
+            print(f"powercap={pc:<4} | min EDP = {best_edp['edp']:.2f}: (gpu_min_powercap={best_edp['gpu_min_powercap']})")
+        if best_energy is not None:
+            print(f"powercap={pc:<4} | min Energy = {best_energy['energy']:.2f}: (gpu_min_powercap={best_energy['gpu_min_powercap']})")
+
+    # helper: make 2D matrix with y=gmin, x=pc
+    def to_grid(metric: str):
+        grid = np.full((len(gmin_vals), len(pc_vals)), np.nan, dtype=float)
+        for i, g in enumerate(gmin_vals):
+            for j, p in enumerate(pc_vals):
+                val = grid_means.get((p, g), {}).get(metric, np.nan)
+                grid[i, j] = val
+        return grid
+
+    metrics = ("energy_used", "edp", "execution_duration")
+
+    for metric in metrics:
+        grid = to_grid(metric)
+
+        plt.figure(figsize=(7, 4))
+        im = plt.imshow(grid, aspect="auto", origin="upper")
+        plt.title(f"{metric.replace('_', ' ').title()} vs Powercap and GPU Min PC")
+        plt.xlabel("Powercap")
+        plt.ylabel("GPU Min Powercap")
+        plt.xticks(range(len(pc_vals)), pc_vals, rotation=45, ha="right")
+        plt.yticks(range(len(gmin_vals)), gmin_vals)
+        plt.colorbar(im)
+
+        # Annotate cells
+        nrows, ncols = grid.shape
+        for i in range(nrows):
+            for j in range(ncols):
+                val = grid[i, j]
+                label = "-" if np.isnan(val) else f"{val:.2f}"
+                plt.text(j, i, label, ha="center", va="center", color="black", fontsize=6, zorder=3)
+
+        # Highlight the single best (minimum)
+        flat = [
+            (grid[i, j], i, j)
+            for i in range(nrows)
+            for j in range(ncols)
+            if not np.isnan(grid[i, j])
+        ]
+        if flat:
+            _, bi, bj = min(flat, key=lambda x: x[0])
+            plt.scatter(bj, bi, s=120, color='red', marker='o', zorder=2)
+
+        filename = Path(out_dir) / f"gpu_powercap_gpu_min_powercap_{metric}.png"
+        plt.tight_layout()
+        plt.savefig(filename, dpi=200)
+        plt.close()
+
 
 def time_powercap_scatter(experiment_result: ExperimentResult):
     # Extracting data
@@ -249,7 +377,7 @@ def print_avg_edp_energy_per_configuration(experiment_result: ExperimentResult):
         avg_energy = r.average("energy_used")
         edp = avg_time * avg_energy
 
-        print(f"powercap={r.parameters.powercap:<4} | avg_energy={avg_energy:.2f}, avg_edp={edp:.2f}")
+        print(f"cpu_enabled={r.parameters.cpu_enabled} powercap={r.parameters.powercap:<4} | avg_energy={avg_energy:.2f}, avg_edp={edp:.2f}")
 
 
 def time_batch_size_scatter(experiment_result: ExperimentResult):
