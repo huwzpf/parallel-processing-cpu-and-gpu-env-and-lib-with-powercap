@@ -17,6 +17,8 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OU
 #include <mpi.h>
 
 
+// For shared state/macros include cudampi_state.h where needed
+
 typedef enum {
   DISABLED,
   CONTINOUS_EQUAL,
@@ -44,6 +46,7 @@ typedef struct
   long long start;
   unsigned long n_elements;
 } __cudampi__batch_pointer;
+
 
 void __cudampi__setglobalpowerlimit(float powerlimit);
 int __cudampi__selectdevicesforpowerlimit_greedy();
@@ -123,5 +126,13 @@ cudaError_t __cudampi__memcpy(void *dst, const void *src, size_t count, enum cud
 void __cudampi__kernelInStream(void *devPtr, cudaStream_t stream, unsigned long long id);
 
 void __cudampi__kernel(void *devPtr, unsigned long long id);
+
+// Power capping helpers moved to powercap.c
+void __cudampi__powercappingManagerStep(void);
+void __cudampi__applyAllPowercaps(void);
+void __cudampi__loadAndLogPowercapConfig(void);
+void __cudampi__allocAndGatherPowercapRanges(void);
+void __cudampi__initDevicePowercapConfig(void);
+void __cudampi__applyInitialPowercapsForStrategy(void);
 
 #endif
