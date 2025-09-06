@@ -44,7 +44,12 @@ typedef enum {
     DESCENT
 } spsaState_t;
 
-/*
+typedef enum {
+    BASE,
+    PROBE
+} simpleGradState_t;
+
+
 typedef struct {
     double  eps;                       
     double  alpha;
@@ -52,23 +57,18 @@ typedef struct {
     double  base_x   [__CUDAMPI_MAX_THREAD_COUNT];
     double  delta   [__CUDAMPI_MAX_THREAD_COUNT];
     double  J_plus;
-} gradientOpt_t;
-*/
+} spsaGradientOpt_t;
 
 typedef struct {
     /* config */
     double  eps;                            /* finite-difference step  */
     double  alpha;                          /* learning rate           */
-
-    /* state machine */
-    int     mode;                           /* 0 = need BASE sample    */
-    int     probe_dim;                      /* which coordinate probe  */
-
-    /* working buffers                                                */
+    simpleGradState_t     mode;
+    int     probe_dim;                      /* which coordinate probe  */ 
     double  base_x   [__CUDAMPI_MAX_THREAD_COUNT];
     double  base_y   [__CUDAMPI_MAX_THREAD_COUNT];
     double  grad     [__CUDAMPI_MAX_THREAD_COUNT];
-} gradientOpt_t;
+} simpleGradientOpt_t;
 
 float computeDevPerformance(double period_us);
 

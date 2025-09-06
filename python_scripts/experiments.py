@@ -20,7 +20,12 @@ def get_arguments(run_parameters: RunParameters):
 
 
 def write_powercap_conf(run_parameters: RunParameters, config_path: str = "powercap.conf"):
-    assert run_parameters.strategy in ["CONTINOUS_EQUAL", "BINARY_GREEDY", "EDP_GRADIENT_OPT"], f"Unsupported strategy: {run_parameters.strategy}"
+    assert run_parameters.strategy in [
+        "CONTINOUS_EQUAL",
+        "BINARY_GREEDY",
+        "EDP_GRADIENT_SIMPLE",
+        "EDP_GRADIENT_SPSA",
+    ], f"Unsupported strategy: {run_parameters.strategy}"
 
     # Base config lines
     lines = [

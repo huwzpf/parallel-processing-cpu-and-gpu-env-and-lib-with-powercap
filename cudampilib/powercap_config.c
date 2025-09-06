@@ -22,6 +22,9 @@ int load_powercap_config(const char *path, powercap_config_t *config) {
     config->cpu_min_powercap = 0.0;
     config->gpu_min_powercap = 0.0;
     config->start_powercap = 0.5;
+    config->start_alpha = 2.0f;     // default START_ALPHA
+    config->alpha_decay = 0.99f;    // default ALPHA_DECAY
+    config->gradient_opt_eps = 5.0f;// default GRADIENT_OPT_EPS
     // Default CPU time window: 1 second (microseconds)
     config->cpu_time_window_us = 1000000ULL;
 
@@ -45,8 +48,10 @@ int load_powercap_config(const char *path, powercap_config_t *config) {
                     config->strategy = CONTINOUS_EQUAL;
                 } else if (strcmp(value, "BINARY_GREEDY") == 0) {
                     config->strategy = BINARY_GREEDY;
-                } else if (strcmp(value, "EDP_GRADIENT_OPT") == 0) {
-                    config->strategy = EDP_GRADIENT_OPT;
+                } else if (strcmp(value, "EDP_GRADIENT_SIMPLE") == 0) {
+                    config->strategy = EDP_GRADIENT_SIMPLE;
+                } else if (strcmp(value, "EDP_GRADIENT_SPSA") == 0) {
+                    config->strategy = EDP_GRADIENT_SPSA;
                 }
             } else if (strcmp(key, "cpu_min_powercap") == 0) {
                 config->cpu_min_powercap = (float)atof(value);
@@ -54,6 +59,12 @@ int load_powercap_config(const char *path, powercap_config_t *config) {
                 config->gpu_min_powercap = (float)atof(value);
             } else if (strcmp(key, "start_powercap") == 0) {
                 config->start_powercap = (float)atof(value);
+            } else if (strcmp(key, "start_alpha") == 0) {
+                config->start_alpha = (float)atof(value);
+            } else if (strcmp(key, "alpha_decay") == 0) {
+                config->alpha_decay = (float)atof(value);
+            } else if (strcmp(key, "gradient_opt_eps") == 0) {
+                config->gradient_opt_eps = (float)atof(value);
             } else if (strcmp(key, "cpu_time_window_us") == 0) {
                 // microseconds
                 config->cpu_time_window_us = (unsigned long long)strtoull(value, NULL, 10);
