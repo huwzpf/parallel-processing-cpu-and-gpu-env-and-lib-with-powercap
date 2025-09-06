@@ -524,8 +524,6 @@ int main(int argc, char **argv) {
 
   MPI_Bcast(&__cudampi__cpu_enabled, 1, MPI_INT, 0, MPI_COMM_WORLD);
   MPI_Bcast(&__cudampi__cpu_power_scaling, 1, MPI_FLOAT, 0, MPI_COMM_WORLD);
-  // Receive CPU power cap time window (microseconds) from master
-  MPI_Bcast(&__cudampi__cpu_time_window_us, 1, MPI_UNSIGNED_LONG_LONG, 0, MPI_COMM_WORLD);
 
   if (__cudampi__cpu_enabled){
       assert(__cudampi__cpu_power_scaling > 0.0 && __cudampi__cpu_power_scaling <= 1.0);
@@ -553,6 +551,9 @@ int main(int argc, char **argv) {
 
   MPI_Allgather(&__cudampi__localFreeThreadCount, 1, MPI_INT, __cudampi__freeThreadsPerNode, 1, MPI_INT, MPI_COMM_WORLD);
   
+  // Receive CPU power cap time window (microseconds) from master
+  MPI_Bcast(&__cudampi__cpu_time_window_us, 1, MPI_UNSIGNED_LONG_LONG, 0, MPI_COMM_WORLD);
+
   MPI_Allgather(&__cudampi__localPowerCapRange, sizeof(perNodePowerCapRange_t), MPI_BYTE, __cudampi__perNodePowerCapRange, sizeof(perNodePowerCapRange_t), MPI_BYTE, MPI_COMM_WORLD);
 
   MPI_Bcast(&__cudampi__totaldevicecount, 1, MPI_INT, 0, MPI_COMM_WORLD);

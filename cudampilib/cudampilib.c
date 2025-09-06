@@ -1081,6 +1081,244 @@ void __cudampi__initializeGradientOpt (double alpha, double eps) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Power-capping helpers (extracted from initializeMPI and deviceSynchronize)
+// ---------------------------------------------------------------------------
+static void __cudampi__loadAndLogPowercapConfig(void) {
+  powercap_config_t file_config;
+  if (load_powercap_config("powercap.conf", &file_config) == 0) {
+    __cudampi__powercapStrategy = file_config.strategy;
+    if (file_config.strategy == CONTINOUS_EQUAL) {
+      __cudampi__cpu_min_powercap = file_config.cpu_min_powercap;
+      __cudampi__gpu_min_powercap = file_config.gpu_min_powercap;
+    } else if (file_config.strategy == EDP_GRADIENT_SIMPLE || file_config.strategy == EDP_GRADIENT_SPSA) {
+      __cudampi__globalpowerlimit = 0;
+      __cudampi__isglobalpowerlimitset = 1;
+      __cudampi__gradient_opt_start_powercap = file_config.start_powercap;
+      __cudampi__gradient_start_alpha = file_config.start_alpha;
+      __cudampi__gradient_alpha_decay = file_config.alpha_decay;
+      __cudampi__gradient_opt_eps = file_config.gradient_opt_eps;
+    }
+    __cudampi__cpu_time_window_us = file_config.cpu_time_window_us;
+  }
+  else {
+    __cudampi__powercapStrategy = BINARY_GREEDY;
+  }
+
+  log_message(LOG_INFO, "CPU power cap time window: %lld", __cudampi__cpu_time_window_us);
+  switch (__cudampi__powercapStrategy) {
+    case BINARY_GREEDY:
+      log_message(LOG_INFO, "Powercap strategy: BINARY_GREEDY");
+      break;
+    case CONTINOUS_EQUAL:
+      log_message(LOG_INFO, "Powercap strategy: CONTINOUS_EQUAL");
+      log_message(LOG_INFO, "CPU min powercap (part of range): %f", __cudampi__cpu_min_powercap);
+      log_message(LOG_INFO, "GPU min powercap (part of range): %f", __cudampi__gpu_min_powercap);
+      break;
+    case EDP_GRADIENT_SIMPLE:
+      log_message(LOG_INFO, "Powercap strategy: EDP_GRADIENT_SIMPLE");
+      log_message(LOG_INFO, "Gradient params: start_alpha=%f, alpha_decay=%f, eps=%f", __cudampi__gradient_start_alpha, __cudampi__gradient_alpha_decay, __cudampi__gradient_opt_eps);
+      break;
+    case EDP_GRADIENT_SPSA:
+      log_message(LOG_INFO, "Powercap strategy: EDP_GRADIENT_SPSA");
+      log_message(LOG_INFO, "Gradient params: start_alpha=%f, alpha_decay=%f, eps=%f", __cudampi__gradient_start_alpha, __cudampi__gradient_alpha_decay, __cudampi__gradient_opt_eps);
+      break;
+    default:
+      log_message(LOG_INFO, "Powercap strategy: UNKNOWN (%d)", __cudampi__powercapStrategy);
+      break;
+  }
+}
+
+static void __cudampi__applyCliPowercapArgument(void) {
+  if (__cudampi__arguments.powercap > 0) {
+    log_message(LOG_INFO, "\nSetting power limit=%d\n", __cudampi__arguments.powercap);
+    __cudampi__setglobalpowerlimit(__cudampi__arguments.powercap);
+  }
+}
+
+static void __cudampi__allocAndGatherPowercapRanges(void) {
+  __cudampi__perNodePowerCapRange = (perNodePowerCapRange_t *)malloc(sizeof(perNodePowerCapRange_t) * __cudampi__MPIproccount);
+  if (!__cudampi__perNodePowerCapRange) {
+    log_message(LOG_ERROR,"\nNot enough memory");
+    exit(-1);
+  }
+
+  // Broadcast CPU time window (us) so slaves use consistent value
+  MPI_Bcast(&__cudampi__cpu_time_window_us, 1, MPI_UNSIGNED_LONG_LONG, 0, MPI_COMM_WORLD);
+
+  // Initialize power cap ranges for local node
+  __cudampi__localPowerCapRange.cpuRange = __cudampi__getCpuPowerCapRange();
+  for (int i = 0; i < __cudampi__localGpuDeviceCount; i++) {
+    __cudampi__localPowerCapRange.gpuRange[i] = __cudampi__getGpuPowerCapRange(i);
+  }
+
+  MPI_Allgather(&__cudampi__localPowerCapRange, sizeof(perNodePowerCapRange_t), MPI_BYTE,
+                __cudampi__perNodePowerCapRange, sizeof(perNodePowerCapRange_t), MPI_BYTE, MPI_COMM_WORLD);
+
+  for (int i = 0; i < __cudampi__MPIproccount; i++) {
+    log_message(LOG_DEBUG, "Node %d CPU Power Cap Range: %f - %f", i, __cudampi__perNodePowerCapRange[i].cpuRange.min, __cudampi__perNodePowerCapRange[i].cpuRange.max);
+    for (int j = 0; j < __cudampi__GPUcountspernode[i]; j++) {
+      log_message(LOG_DEBUG, "Node %d GPU %d Power Cap Range: %f - %f", i, j, __cudampi__perNodePowerCapRange[i].gpuRange[j].min, __cudampi__perNodePowerCapRange[i].gpuRange[j].max);
+    }
+  }
+}
+
+static void __cudampi__initDevicePowercapConfig(void) {
+  for (int i = 0; i < __cudampi_totaldevicecount; i++) {
+    __cudampi__devicePowerConfig[i].currentPower = -1; // initial value
+    __cudampi__devicePowerConfig[i].deviceEnabled = 1;
+
+    const int rank = __cudampi_targetMPIrankfordevice[i];
+    if (i < __cudampi_totalgpudevicecount) {
+      const int gpu = __cudampi_targetGPUfordevice[i];
+      __cudampi__devicePowerConfig[i].powercapRange = __cudampi__perNodePowerCapRange[rank].gpuRange[gpu];
+      __cudampi__devicePowerConfig[i].minPowerCap = getPowerCapFromRange(
+        __cudampi__devicePowerConfig[i].powercapRange.min,
+        __cudampi__devicePowerConfig[i].powercapRange.max,
+        __cudampi__gpu_min_powercap);
+    } else {
+      __cudampi__devicePowerConfig[i].powercapRange = __cudampi__perNodePowerCapRange[rank].cpuRange;
+      __cudampi__devicePowerConfig[i].minPowerCap = getPowerCapFromRange(
+        __cudampi__devicePowerConfig[i].powercapRange.min,
+        __cudampi__devicePowerConfig[i].powercapRange.max,
+        __cudampi__cpu_min_powercap);
+    }
+  }
+}
+
+static void __cudampi__applyInitialPowercapsForStrategy(void) {
+  if (!__cudampi__isglobalpowerlimitset) return;
+
+  if (__cudampi__powercapStrategy == EDP_GRADIENT_SIMPLE || __cudampi__powercapStrategy == EDP_GRADIENT_SPSA) {
+    for (int i = 0; i < __cudampi_totaldevicecount; i++) {
+      __cudampi__devicePowerConfig[i].currentPowerCap = getPowerCapFromRange(
+        __cudampi__devicePowerConfig[i].powercapRange.min,
+        __cudampi__devicePowerConfig[i].powercapRange.max,
+        __cudampi__gradient_opt_start_powercap);
+    }
+    __cudampi__initializeGradientOpt(__cudampi__gradient_start_alpha, __cudampi__gradient_opt_eps);
+  }
+
+  if (__cudampi__powercapStrategy == CONTINOUS_EQUAL) {
+    float totalMinPowerCap = 0.0f;
+    for (int i = 0; i < __cudampi_totaldevicecount; i++) {
+      totalMinPowerCap += __cudampi__devicePowerConfig[i].minPowerCap;
+    }
+    log_message(LOG_INFO, "Total min power cap: %f", totalMinPowerCap);
+
+    if (totalMinPowerCap >= __cudampi__globalpowerlimit) {
+      log_message(LOG_INFO, "Setting all devices to minimum power cap.");
+      for (int i = 0; i < __cudampi_totaldevicecount; i++) {
+        __cudampi__devicePowerConfig[i].currentPowerCap = __cudampi__devicePowerConfig[i].minPowerCap;
+      }
+    } else {
+      log_message(LOG_INFO, "Distributing extra power proportionally among devices.");
+      float extraPower = __cudampi__globalpowerlimit - totalMinPowerCap;
+      log_message(LOG_INFO, "Extra power: %f", extraPower);
+
+      float totalFreeCapacity = 0.0f;
+      for (int i = 0; i < __cudampi_totaldevicecount; i++) {
+        __cudampi__devicePowerConfig[i].currentPowerCap = __cudampi__devicePowerConfig[i].minPowerCap;
+        totalFreeCapacity += (__cudampi__devicePowerConfig[i].powercapRange.max - __cudampi__devicePowerConfig[i].minPowerCap);
+      }
+
+      if (extraPower >= totalFreeCapacity) {
+        log_message(LOG_INFO, "Extra power is more than or equal to total available free capacity. Setting all to max.");
+        for (int i = 0; i < __cudampi_totaldevicecount; i++) {
+          __cudampi__devicePowerConfig[i].currentPowerCap = __cudampi__devicePowerConfig[i].powercapRange.max;
+        }
+      } else if (totalFreeCapacity > 0.0f) {
+        for (int i = 0; i < __cudampi_totaldevicecount; i++) {
+          float freeCapacity = __cudampi__devicePowerConfig[i].powercapRange.max - __cudampi__devicePowerConfig[i].minPowerCap;
+          __cudampi__devicePowerConfig[i].currentPowerCap += extraPower * (freeCapacity / totalFreeCapacity);
+        }
+      }
+    }
+  }
+
+  for (int i = 0; i < __cudampi_totaldevicecount; i++) {
+    log_message(LOG_INFO, "Power capping configuration for device %d:", i);
+    log_message(LOG_INFO, "  Enabled         : %d", __cudampi__devicePowerConfig[i].deviceEnabled);
+    log_message(LOG_INFO, "  Current Power Cap   : %f", __cudampi__devicePowerConfig[i].currentPowerCap);
+    log_message(LOG_INFO, "  Minimum Power Cap   : %f", __cudampi__devicePowerConfig[i].minPowerCap);
+    log_message(LOG_INFO, "  Power Cap Range : [%f, %f]",
+         __cudampi__devicePowerConfig[i].powercapRange.min,
+         __cudampi__devicePowerConfig[i].powercapRange.max);
+  }
+}
+
+static void __cudampi__powercappingManagerStep(void) {
+  int amimanager;
+  omp_set_lock(&(__cudampi__devicelocks[__cudampi__currentDevice]));
+  amimanager = __cudampi__amimanager[__cudampi__currentDevice];
+  omp_unset_lock(&(__cudampi__devicelocks[__cudampi__currentDevice]));
+
+  static int selecteddevices = 0; // only updated by manager thread
+
+  if (!(amimanager && __cudampi__isglobalpowerlimitset)) return;
+
+  if (__cudampi__powercapStrategy == BINARY_GREEDY) {
+    if (!selecteddevices) {
+      selecteddevices = __cudampi__selectdevicesforpowerlimit_greedy();
+    } else {
+      float power = __cudampi__gettotalpowerofselecteddevices();
+      if (power != (-1)) {
+        if (power > __cudampi__globalpowerlimit) {
+          log_message(LOG_DEBUG,"\ntotal power=%f limit=%f, adjusting", power, __cudampi__globalpowerlimit);
+          fflush(stdout);
+          __cudampi__selectdevicesforpowerlimit_greedy();
+        }
+      }
+    }
+  }
+  else if (__cudampi__powercapStrategy == CONTINOUS_EQUAL) {
+    if (!selecteddevices) {
+      selecteddevices = __cudampi__selectpowercap_equal();
+    }
+  }
+  else if (__cudampi__powercapStrategy == EDP_GRADIENT_SIMPLE || __cudampi__powercapStrategy == EDP_GRADIENT_SPSA) {
+    log_message(LOG_INFO, "EDP Gradient Optimization: Checking if all devices have completed their last batch.");
+    int allDevicesCompleted = 1;
+    for (int i = 0; i < __cudampi_totaldevicecount; i++) {
+      omp_set_lock(&(__cudampi__devicelocks[i]));
+      if (__cudampi__mgr_batches_sent[i] >= __cudampi__last_batches_sent[i]) {
+        log_message(LOG_INFO, "Device %d has not completed its last batch yet. Current: %ld, Last: %ld", i, __cudampi__mgr_batches_sent[i], __cudampi__last_batches_sent[i]);
+        allDevicesCompleted = 0;
+        omp_unset_lock(&(__cudampi__devicelocks[i]));
+        break;
+      }
+      __cudampi__mgr_edp[i] = (__cudampi__time_us[i] / 1000000.0) * __cudampi__devicePowerConfig[i].currentPower;
+      omp_unset_lock(&(__cudampi__devicelocks[i]));
+    }
+
+    if(allDevicesCompleted) {
+      log_message(LOG_INFO, "All devices have completed their last batch. Proceeding with optimization.");
+      __cudampi__selectpowercap_gradient();
+      for (int i = 0; i < __cudampi_totaldevicecount; i++) {
+        omp_set_lock(&(__cudampi__devicelocks[i]));
+        __cudampi__mgr_batches_sent[i] == __cudampi__last_batches_sent[i];
+        omp_unset_lock(&(__cudampi__devicelocks[i]));
+      }
+    } else {
+      log_message(LOG_INFO, "Not all devices have completed their last batch. Skipping optimization.");
+    }
+  }
+}
+
+static void __cudampi__applyAllPowercaps(void) {
+  // Push configured power caps to devices based on selected strategy
+  if (__cudampi__isglobalpowerlimitset &&
+      (__cudampi__powercapStrategy == CONTINOUS_EQUAL ||
+       __cudampi__powercapStrategy == EDP_GRADIENT_SIMPLE ||
+       __cudampi__powercapStrategy == EDP_GRADIENT_SPSA)) {
+    for (int i = 0; i < __cudampi_totaldevicecount; i++) {
+      if (__cudampi__devicePowerConfig[i].currentPowerCap != -1) {
+        setDevicePowerCap(i);
+      }
+    }
+  }
+}
+
 void __cudampi__initializeMPI(int argc, char **argv) {
 
   int mtsprovided;
@@ -1125,52 +1363,7 @@ void __cudampi__initializeMPI(int argc, char **argv) {
   __cudampi__default_batch_size = __cudampi__arguments.batch_size;
 
   __cudampi__cpu_power_scaling = __cudampi__arguments.cpu_power_scaling;
-
-  // Load power capping configuration from file if available
-  powercap_config_t file_config;
-  if (load_powercap_config("powercap.conf", &file_config) == 0) {
-    __cudampi__powercapStrategy = file_config.strategy;
-    if (file_config.strategy == CONTINOUS_EQUAL) {
-      __cudampi__cpu_min_powercap = file_config.cpu_min_powercap;
-      __cudampi__gpu_min_powercap = file_config.gpu_min_powercap;
-    } else if (file_config.strategy == EDP_GRADIENT_SIMPLE || file_config.strategy == EDP_GRADIENT_SPSA) {
-      __cudampi__globalpowerlimit = 0;
-      __cudampi__isglobalpowerlimitset = 1;
-      __cudampi__gradient_opt_start_powercap = file_config.start_powercap;
-      __cudampi__gradient_start_alpha = file_config.start_alpha;
-      __cudampi__gradient_alpha_decay = file_config.alpha_decay;
-      __cudampi__gradient_opt_eps = file_config.gradient_opt_eps;
-    }
-    // Always take configured CPU time window (us)
-    __cudampi__cpu_time_window_us = file_config.cpu_time_window_us;
-  }
-  else {
-    __cudampi__powercapStrategy = BINARY_GREEDY;
-  }
-
-  log_message(LOG_INFO, "CPU power cap time window: %lld", __cudampi__cpu_time_window_us);
-  // Print selected powercap strategy and, for continuous strategy, print min powercap parts
-  switch (__cudampi__powercapStrategy) {
-    case BINARY_GREEDY:
-      log_message(LOG_INFO, "Powercap strategy: BINARY_GREEDY");
-      break;
-    case CONTINOUS_EQUAL:
-      log_message(LOG_INFO, "Powercap strategy: CONTINOUS_EQUAL");
-      log_message(LOG_INFO, "CPU min powercap (part of range): %f", __cudampi__cpu_min_powercap);
-      log_message(LOG_INFO, "GPU min powercap (part of range): %f", __cudampi__gpu_min_powercap);
-      break;
-    case EDP_GRADIENT_SIMPLE:
-      log_message(LOG_INFO, "Powercap strategy: EDP_GRADIENT_SIMPLE");
-      log_message(LOG_INFO, "Gradient params: start_alpha=%f, alpha_decay=%f, eps=%f", __cudampi__gradient_start_alpha, __cudampi__gradient_alpha_decay, __cudampi__gradient_opt_eps);
-      break;
-    case EDP_GRADIENT_SPSA:
-      log_message(LOG_INFO, "Powercap strategy: EDP_GRADIENT_SPSA");
-      log_message(LOG_INFO, "Gradient params: start_alpha=%f, alpha_decay=%f, eps=%f", __cudampi__gradient_start_alpha, __cudampi__gradient_alpha_decay, __cudampi__gradient_opt_eps);
-      break;
-    default:
-      log_message(LOG_INFO, "Powercap strategy: UNKNOWN (%d)", __cudampi__powercapStrategy);
-      break;
-  }
+  __cudampi__loadAndLogPowercapConfig();
 
   if (__cudampi__cpu_enabled == 0)
   {
@@ -1201,10 +1394,7 @@ void __cudampi__initializeMPI(int argc, char **argv) {
       exit(-1);
   }
 
-  if (__cudampi__arguments.powercap > 0) {
-    log_message(LOG_INFO, "\nSetting power limit=%d\n", __cudampi__arguments.powercap);
-    __cudampi__setglobalpowerlimit(__cudampi__arguments.powercap);
-  }
+  __cudampi__applyCliPowercapArgument();
 
   // fetch information about the rank and number of processes
 
@@ -1244,8 +1434,6 @@ void __cudampi__initializeMPI(int argc, char **argv) {
 
   MPI_Bcast(&__cudampi__cpu_enabled, 1, MPI_INT, 0, MPI_COMM_WORLD);
   MPI_Bcast(&__cudampi__cpu_power_scaling, 1, MPI_FLOAT, 0, MPI_COMM_WORLD);
-  // Broadcast CPU time window (us) so slaves use consistent value
-  MPI_Bcast(&__cudampi__cpu_time_window_us, 1, MPI_UNSIGNED_LONG_LONG, 0, MPI_COMM_WORLD);
 
   MPI_Allgather(&__cudampi__localGpuDeviceCount, 1, MPI_INT, __cudampi__GPUcountspernode, 1, MPI_INT, MPI_COMM_WORLD);
 
@@ -1254,21 +1442,8 @@ void __cudampi__initializeMPI(int argc, char **argv) {
 
   MPI_Allgather(&__cudampi__localFreeThreadCount, 1, MPI_INT, __cudampi__freeThreadsPerNode, 1, MPI_INT, MPI_COMM_WORLD);
 
-  // Initialize power cap ranges for local node
-  __cudampi__localPowerCapRange.cpuRange = __cudampi__getCpuPowerCapRange();
-  for (int i = 0; i < __cudampi__localGpuDeviceCount; i++) {
-    __cudampi__localPowerCapRange.gpuRange[i] = __cudampi__getGpuPowerCapRange(i);
-  }
-
-  MPI_Allgather(&__cudampi__localPowerCapRange, sizeof(perNodePowerCapRange_t), MPI_BYTE, __cudampi__perNodePowerCapRange, sizeof(perNodePowerCapRange_t), MPI_BYTE, MPI_COMM_WORLD);
-
-  // Print all power cap ranges that were gathered
-  for (int i = 0; i < __cudampi__MPIproccount; i++) {
-    log_message(LOG_DEBUG, "Node %d CPU Power Cap Range: %f - %f", i, __cudampi__perNodePowerCapRange[i].cpuRange.min, __cudampi__perNodePowerCapRange[i].cpuRange.max);
-    for (int j = 0; j < __cudampi__GPUcountspernode[i]; j++) {
-      log_message(LOG_DEBUG, "Node %d GPU %d Power Cap Range: %f - %f", i, j, __cudampi__perNodePowerCapRange[i].gpuRange[j].min, __cudampi__perNodePowerCapRange[i].gpuRange[j].max);
-    }
-  }
+  // Gather powercap ranges (includes broadcasting CPU time window)
+  __cudampi__allocAndGatherPowercapRanges();
 
   // check if there is a configuration file
   FILE *filep = fopen("__cudampi.conf", "r");
@@ -1320,11 +1495,6 @@ void __cudampi__initializeMPI(int argc, char **argv) {
     __cudampi_targetGPUfordevice[i] = currentGPU;
     __cudampi_targetMPIrankfordevice[i] = currentrank;
 
-    __cudampi__devicePowerConfig[i].currentPower = -1; // initial value
-    __cudampi__devicePowerConfig[i].deviceEnabled = 1;
-    __cudampi__devicePowerConfig[i].powercapRange = __cudampi__perNodePowerCapRange[currentrank].gpuRange[currentGPU];
-    __cudampi__devicePowerConfig[i].minPowerCap = getPowerCapFromRange(__cudampi__devicePowerConfig[i].powercapRange.min, __cudampi__devicePowerConfig[i].powercapRange.max, __cudampi__gpu_min_powercap);
-
     currentGPU++;
 
     if (currentGPU == __cudampi__GPUcountspernode[currentrank]) {
@@ -1342,80 +1512,14 @@ void __cudampi__initializeMPI(int argc, char **argv) {
       currentrank ++;
     }
     __cudampi_targetGPUfordevice[i] = -1;
-    __cudampi__devicePowerConfig[i].currentPower = -1; // initial value
-    __cudampi__devicePowerConfig[i].deviceEnabled = 1;
-    __cudampi__devicePowerConfig[i].powercapRange = __cudampi__perNodePowerCapRange[currentrank].cpuRange;
-    __cudampi__devicePowerConfig[i].minPowerCap = getPowerCapFromRange(__cudampi__devicePowerConfig[i].powercapRange.min, __cudampi__devicePowerConfig[i].powercapRange.max, __cudampi__cpu_min_powercap);
 
     __cudampi_targetMPIrankfordevice[i] = currentrank;
     currentrank ++;
   }
 
-  if (__cudampi__isglobalpowerlimitset && (__cudampi__powercapStrategy == EDP_GRADIENT_SIMPLE || __cudampi__powercapStrategy == EDP_GRADIENT_SPSA)) {
-    for (i = 0; i < __cudampi_totaldevicecount; i++) {
-      __cudampi__devicePowerConfig[i].currentPowerCap = getPowerCapFromRange(__cudampi__devicePowerConfig[i].powercapRange.min, __cudampi__devicePowerConfig[i].powercapRange.max, __cudampi__gradient_opt_start_powercap);
-    }
-    __cudampi__initializeGradientOpt(__cudampi__gradient_start_alpha, __cudampi__gradient_opt_eps);
-  }
-
-  if (__cudampi__isglobalpowerlimitset && __cudampi__powercapStrategy == CONTINOUS_EQUAL) {
-    // If power limit is set, distribute initial power caps between devices equally
-    // If sum of __cudampi__devicePowerConfig[i].minPowerCap is larger than limit, set all to minPowerCap
-    // Otherwise distribute power limit equally between devices, proportionally to their minPowerCap, but no more than max
-    float totalMinPowerCap = 0;
-    for (i = 0; i < __cudampi_totaldevicecount; i++) {
-      totalMinPowerCap += __cudampi__devicePowerConfig[i].minPowerCap;
-    }
-    log_message(LOG_INFO, "Total min power cap: %f", totalMinPowerCap);
-
-    if (totalMinPowerCap >= __cudampi__globalpowerlimit) {
-      // Sum of minPowerCaps is larger than the power limit.
-      // Set each device's current power to its minimum.
-      log_message(LOG_INFO, "Setting all devices to minimum power cap.");
-      for (int i = 0; i < __cudampi_totaldevicecount; i++) {
-        __cudampi__devicePowerConfig[i].currentPowerCap = __cudampi__devicePowerConfig[i].minPowerCap;
-      }
-    } else {
-      // Extra power available to distribute. Distribute proportionally based on free capacity.
-      log_message(LOG_INFO, "Distributing extra power proportionally among devices.");
-      float extraPower = __cudampi__globalpowerlimit - totalMinPowerCap;
-      log_message(LOG_INFO, "Extra power: %f", extraPower);
-
-      // First, initialize current power to min for every device and compute total free capacity.
-      float totalFreeCapacity = 0.0f;
-      for (int i = 0; i < __cudampi_totaldevicecount; i++) {
-      __cudampi__devicePowerConfig[i].currentPowerCap = __cudampi__devicePowerConfig[i].minPowerCap;
-      totalFreeCapacity += (__cudampi__devicePowerConfig[i].powercapRange.max - __cudampi__devicePowerConfig[i].minPowerCap);
-      }
-
-      // Now distribute the extra power in one pass.
-      if (extraPower >= totalFreeCapacity) {
-        log_message(LOG_INFO, "Extra power is more than or equal to total available free capacity. Setting all to max.");
-        // If extra power is more than or equal to total available free capacity, set all to max.
-        for (int i = 0; i < __cudampi_totaldevicecount; i++) {
-          __cudampi__devicePowerConfig[i].currentPower = __cudampi__devicePowerConfig[i].powercapRange.max;
-        }
-      } else {
-        log_message(LOG_INFO, "Extra power is less than total available free capacity. Distributing proportionally.");
-        // Otherwise add a proportional share of extra power to each device.
-        for (int i = 0; i < __cudampi_totaldevicecount; i++) {
-          float freeCapacity = __cudampi__devicePowerConfig[i].powercapRange.max - __cudampi__devicePowerConfig[i].minPowerCap;
-          __cudampi__devicePowerConfig[i].currentPower += extraPower * (freeCapacity / totalFreeCapacity);
-        }
-      }
-    }
-  }
-
-  
-  for (int i = 0; i < __cudampi_totaldevicecount; i++) {
-    log_message(LOG_INFO, "Power capping configuration for device %d:", i);
-    log_message(LOG_INFO, "  Enabled         : %d", __cudampi__devicePowerConfig[i].deviceEnabled);
-    log_message(LOG_INFO, "  Current Power Cap   : %f", __cudampi__devicePowerConfig[i].currentPowerCap);
-    log_message(LOG_INFO, "  Minimum Power Cap   : %f", __cudampi__devicePowerConfig[i].minPowerCap);
-    log_message(LOG_INFO, "  Power Cap Range : [%f, %f]",
-         __cudampi__devicePowerConfig[i].powercapRange.min,
-         __cudampi__devicePowerConfig[i].powercapRange.max);
-  }
+  // Initialize powercap state per device and apply initial caps according to strategy
+  __cudampi__initDevicePowercapConfig();
+  __cudampi__applyInitialPowercapsForStrategy();
 
 
   for (int i = 0; i < __CUDAMPI_MAX_THREAD_COUNT; i++) {
@@ -1456,13 +1560,7 @@ void __cudampi__initializeMPI(int argc, char **argv) {
   }
 
   // apply changes to all powercaps
-  if (__cudampi__isglobalpowerlimitset && (__cudampi__powercapStrategy == CONTINOUS_EQUAL || __cudampi__powercapStrategy == EDP_GRADIENT_SIMPLE || __cudampi__powercapStrategy == EDP_GRADIENT_SPSA)) {
-    for (int i = 0; i < __cudampi_totaldevicecount; i++) {
-      if (__cudampi__devicePowerConfig[i].currentPowerCap != -1) {
-        setDevicePowerCap(i);
-      }
-    }
-  }
+  __cudampi__applyAllPowercaps();
 
   for (int i = 0; i < __cudampi_totaldevicecount; i++ ) {
     TAILQ_INIT(&(__cudampi__memcpy_queues[i]));
@@ -1646,73 +1744,10 @@ cudaError_t __cudampi__cudaDeviceSynchronize(void)
 cudaError_t __cudampi__deviceSynchronize(void) {
 
   cudaError_t retVal;
-  static int selecteddevices = 0; // only updated by thread 0
-  int amimanager;                 // if the current thread is manager for device selection
   float energy = -1, power = -1;
 
-  // if ((powermeasurecounter[omp_get_thread_num()]%10)==4) {
-
-  omp_set_lock(&(__cudampi__devicelocks[__cudampi__currentDevice]));
-  amimanager = __cudampi__amimanager[__cudampi__currentDevice];
-  omp_unset_lock(&(__cudampi__devicelocks[__cudampi__currentDevice]));
-
-  if (amimanager && __cudampi__isglobalpowerlimitset) {
-    if (__cudampi__powercapStrategy == BINARY_GREEDY) {
-      if (!selecteddevices) {
-        selecteddevices = __cudampi__selectdevicesforpowerlimit_greedy();
-      } else {
-
-        // adjust if needed
-        float power;
-        power = __cudampi__gettotalpowerofselecteddevices();
-        if (power != (-1)) {
-          if (power > __cudampi__globalpowerlimit) {
-            log_message(LOG_DEBUG,"\ntotal power=%f limit=%f, adjusting", power, __cudampi__globalpowerlimit);
-            fflush(stdout);
-            __cudampi__selectdevicesforpowerlimit_greedy();
-          }
-        }
-      }
-    }
-    else if (__cudampi__powercapStrategy == CONTINOUS_EQUAL) {
-      if (!selecteddevices) {
-        // TODO: Should we do this every iteration or just once ?
-        selecteddevices = __cudampi__selectpowercap_equal();
-      }
-    }
-    else if (__cudampi__powercapStrategy == EDP_GRADIENT_SIMPLE || __cudampi__powercapStrategy == EDP_GRADIENT_SPSA) {
-      log_message(LOG_INFO, "EDP Gradient Optimization: Checking if all devices have completed their last batch.");
-      // Iterate over all devices and check if every device completed one iteration
-      int allDevicesCompleted = 1;
-      for (int i = 0; i < __cudampi_totaldevicecount; i++) {
-        omp_set_lock(&(__cudampi__devicelocks[i]));
-        if (__cudampi__mgr_batches_sent[i] >= __cudampi__last_batches_sent[i]) {
-          log_message(LOG_INFO, "Device %d has not completed its last batch yet. Current: %ld, Last: %ld", i, __cudampi__mgr_batches_sent[i], __cudampi__last_batches_sent[i]);
-          allDevicesCompleted = 0;
-          omp_unset_lock(&(__cudampi__devicelocks[i]));
-          break;
-        }
-        // TODO: Check if currentPower or currentPowerCap should be used
-        __cudampi__mgr_edp[i] = (__cudampi__time_us[i] / 1000000.0) * __cudampi__devicePowerConfig[i].currentPower;
-        omp_unset_lock(&(__cudampi__devicelocks[i]));
-      }
-
-      if(allDevicesCompleted) {
-        log_message(LOG_INFO, "All devices have completed their last batch. Proceeding with optimization.");
-        // Do the optimization
-        __cudampi__selectpowercap_gradient();
-        // Update the last batches sent
-        for (int i = 0; i < __cudampi_totaldevicecount; i++) {
-          omp_set_lock(&(__cudampi__devicelocks[i]));
-          __cudampi__mgr_batches_sent[i] == __cudampi__last_batches_sent[i];
-          omp_unset_lock(&(__cudampi__devicelocks[i]));
-        }
-      }
-      else {
-        log_message(LOG_INFO, "Not all devices have completed their last batch. Skipping optimization.");
-      }
-    }
-  }
+  // Handle power-capping decisions (manager thread only)
+  __cudampi__powercappingManagerStep();
 
   if (__cudampi_isLocalGpu) { // run GPU synchronization locally
 
