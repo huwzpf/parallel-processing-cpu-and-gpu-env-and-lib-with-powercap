@@ -18,7 +18,7 @@ int load_powercap_config(const char *path, powercap_config_t *config) {
     if (!config) return -1;
 
     // Default values
-    config->strategy = BINARY_GREEDY;
+    config->strategy = DISABLED;
     config->cpu_min_powercap = 0.0;
     config->gpu_min_powercap = 0.0;
     config->start_powercap = 0.5;
@@ -45,7 +45,9 @@ int load_powercap_config(const char *path, powercap_config_t *config) {
         char value[128];
         if (sscanf(line, "%127[^=]=%127s", key, value) == 2) {
             if (strcmp(key, "strategy") == 0) {
-                if (strcmp(value, "CONTINOUS_EQUAL") == 0) {
+                if (strcmp(value, "DISABLED") == 0) {
+                    config->strategy = DISABLED;
+                } else if (strcmp(value, "CONTINOUS_EQUAL") == 0) {
                     config->strategy = CONTINOUS_EQUAL;
                 } else if (strcmp(value, "BINARY_GREEDY") == 0) {
                     config->strategy = BINARY_GREEDY;
