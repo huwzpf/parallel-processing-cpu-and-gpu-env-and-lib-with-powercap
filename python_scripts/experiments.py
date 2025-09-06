@@ -12,11 +12,11 @@ def get_arguments(run_parameters: RunParameters):
     cpu_enabled_arg = "1" if run_parameters.cpu_enabled else "0"
     number_of_streams_arg = str(run_parameters.number_of_streams)
     batch_size_arg = str(run_parameters.batch_size)
-    powercap_arg = str(run_parameters.powercap) if run_parameters.powercap else "0"
     cpu_power_scaling_arg = str(run_parameters.cpu_power_scaling) if run_parameters.cpu_power_scaling else "0"
     initial_cpu_batch_size_scaling = str(run_parameters.initial_cpu_batch_size_scaling) if run_parameters.initial_cpu_batch_size_scaling else "0"
     # Note: cpu_min_powercap and gpu_min_powercap are now configured via powercap.conf
-    return f"--cpu-enabled={cpu_enabled_arg} --number-of-streams={number_of_streams_arg} --batch-size={batch_size_arg} --powercap={powercap_arg} --cpu-power-scaling={cpu_power_scaling_arg} --initial-cpu-batch-size-scaling={initial_cpu_batch_size_scaling}"
+    # Powercap is now configured via powercap.conf (global_powercap)
+    return f"--cpu-enabled={cpu_enabled_arg} --number-of-streams={number_of_streams_arg} --batch-size={batch_size_arg} --cpu-power-scaling={cpu_power_scaling_arg} --initial-cpu-batch-size-scaling={initial_cpu_batch_size_scaling}"
 
 
 def write_powercap_conf(run_parameters: RunParameters, config_path: str = "powercap.conf"):
@@ -38,6 +38,10 @@ def write_powercap_conf(run_parameters: RunParameters, config_path: str = "power
     gpu_min = run_parameters.gpu_min_powercap if run_parameters.gpu_min_powercap is not None else 0.1
     lines.append(f"cpu_min_powercap={cpu_min}")
     lines.append(f"gpu_min_powercap={gpu_min}")
+
+    # Global powercap (Watts) if provided
+    if run_parameters.powercap:
+        lines.append(f"global_powercap={run_parameters.powercap}")
 
     # Optional CPU time window (us); default 1s if not provided
     cpu_time_window_us = run_parameters.cpu_time_window_us if run_parameters.cpu_time_window_us is not None else 1_000_000

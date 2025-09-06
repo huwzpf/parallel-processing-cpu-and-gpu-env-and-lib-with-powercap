@@ -11,6 +11,7 @@ typedef struct {
     float cpu_min_powercap;      // minimum CPU power cap (for continuous strategy)
     float gpu_min_powercap;      // minimum GPU power cap (for continuous strategy)
     float start_powercap;        // starting power cap (for gradient optimization)
+    float global_powercap;       // global power cap in Watts (0 means disabled)
     // Gradient optimisation parameters (used for EDP_GRADIENT_* strategies)
     float start_alpha;           // initial learning rate (default 2.0)
     float alpha_decay;           // learning rate decay per iteration (default 0.99)

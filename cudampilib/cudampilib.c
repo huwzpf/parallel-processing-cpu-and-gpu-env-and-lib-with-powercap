@@ -131,7 +131,6 @@ static struct argp_option options[] = {
   { "cpu-enabled",                       'c',  "ENABLED",           0, "Enable CPU processing (1 to enable, 0 to disable)" },
   { "number-of-streams",                 'n',  "NUM",               0, "Set the number of streams" },
   { "batch-size",                        'b',  "SIZE",              0, "Set the batch size" },
-  { "powercap",                          'p',  "WATTS",             0, "Set the power cap (0 to disable)" },
   { "cpu-power-scaling",                 's',  "SCALING FACTOR",    0, "Set the CPU power scaling factor" },
   { "initial-cpu-batch-size-scaling",    'f',  "SCALING FACTOR",    0, "Set initial scaling factor for CPU batch size (0 to disable)" },
   { "disable-dynamic-cpu-batch-scaling",  0,    0,                  0, "Disable dynamic CPU batch size scaling" },
@@ -318,9 +317,6 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state)
       break;
     case 'b':
       arguments->batch_size = atol(arg);
-      break;
-    case 'p':
-      arguments->powercap = atoi(arg);
       break;
     case 's':
       arguments->cpu_power_scaling = atof(arg);
@@ -1100,10 +1096,16 @@ static void __cudampi__loadAndLogPowercapConfig(void) {
       __cudampi__gradient_opt_eps = file_config.gradient_opt_eps;
     }
     __cudampi__cpu_time_window_us = file_config.cpu_time_window_us;
+    // Apply global powercap from config if provided (> 0)
+    if (file_config.global_powercap > 0.0f) {
+      log_message(LOG_INFO, "Setting global powercap from config: %f", file_config.global_powercap);
+      __cudampi__setglobalpowerlimit(file_config.global_powercap);
+    }
   }
   else {
     __cudampi__powercapStrategy = BINARY_GREEDY;
   }
+
 
   log_message(LOG_INFO, "CPU power cap time window: %lld", __cudampi__cpu_time_window_us);
   switch (__cudampi__powercapStrategy) {
@@ -1126,13 +1128,6 @@ static void __cudampi__loadAndLogPowercapConfig(void) {
     default:
       log_message(LOG_INFO, "Powercap strategy: UNKNOWN (%d)", __cudampi__powercapStrategy);
       break;
-  }
-}
-
-static void __cudampi__applyCliPowercapArgument(void) {
-  if (__cudampi__arguments.powercap > 0) {
-    log_message(LOG_INFO, "\nSetting power limit=%d\n", __cudampi__arguments.powercap);
-    __cudampi__setglobalpowerlimit(__cudampi__arguments.powercap);
   }
 }
 
@@ -1336,7 +1331,6 @@ void __cudampi__initializeMPI(int argc, char **argv) {
   __cudampi__arguments.cpu_enabled = 1;
   __cudampi__arguments.number_of_streams = 1;
   __cudampi__arguments.batch_size = 0;
-  __cudampi__arguments.powercap = 0;
   __cudampi__arguments.cpu_power_scaling = 0.0;
   __cudampi__arguments.cpu_batch_scaling_factor = 0;
   __cudampi__arguments.use_dynamic_scaling = 1;
@@ -1353,7 +1347,6 @@ void __cudampi__initializeMPI(int argc, char **argv) {
   log_message(LOG_INFO, "CPU Enabled                                : %d",   __cudampi__arguments.cpu_enabled);
   log_message(LOG_INFO, "Number of Streams                          : %d",   __cudampi__arguments.number_of_streams);
   log_message(LOG_INFO, "Batch Size                                 : %d",   __cudampi__arguments.batch_size);
-  log_message(LOG_INFO, "Power Cap                                  : %d",   __cudampi__arguments.powercap);
   log_message(LOG_INFO, "CPU Power Scaling                          : %f",   __cudampi__arguments.cpu_power_scaling);
   log_message(LOG_INFO, "Initial Cpu Batch Size Scaling Factor      : %d",   __cudampi__arguments.cpu_batch_scaling_factor);
   log_message(LOG_INFO, "Dynamic CPU Batch Size Scaling Enabled     : %d",   __cudampi__arguments.use_dynamic_scaling);
@@ -1394,7 +1387,7 @@ void __cudampi__initializeMPI(int argc, char **argv) {
       exit(-1);
   }
 
-  __cudampi__applyCliPowercapArgument();
+  // Powercap may be set via config; CLI fallback handled inside loader
 
   // fetch information about the rank and number of processes
 

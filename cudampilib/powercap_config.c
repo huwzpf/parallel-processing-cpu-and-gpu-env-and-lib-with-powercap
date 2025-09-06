@@ -22,6 +22,7 @@ int load_powercap_config(const char *path, powercap_config_t *config) {
     config->cpu_min_powercap = 0.0;
     config->gpu_min_powercap = 0.0;
     config->start_powercap = 0.5;
+    config->global_powercap = 0.0f; // disabled by default
     config->start_alpha = 2.0f;     // default START_ALPHA
     config->alpha_decay = 0.99f;    // default ALPHA_DECAY
     config->gradient_opt_eps = 5.0f;// default GRADIENT_OPT_EPS
@@ -65,6 +66,8 @@ int load_powercap_config(const char *path, powercap_config_t *config) {
                 config->alpha_decay = (float)atof(value);
             } else if (strcmp(key, "gradient_opt_eps") == 0) {
                 config->gradient_opt_eps = (float)atof(value);
+            } else if (strcmp(key, "global_powercap") == 0) {
+                config->global_powercap = (float)atof(value);
             } else if (strcmp(key, "cpu_time_window_us") == 0) {
                 // microseconds
                 config->cpu_time_window_us = (unsigned long long)strtoull(value, NULL, 10);
