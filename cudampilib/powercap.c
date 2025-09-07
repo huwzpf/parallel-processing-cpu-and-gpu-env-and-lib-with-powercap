@@ -14,6 +14,7 @@
 #include "cudampicommon.h"
 #include "cudampilib.h"
 #include "powercap_config.h"
+#include "powercap.h"
 #include "cudampi_state.h"
 
 powercapStrategy_t __cudampi__powercapStrategy = DISABLED;
@@ -78,6 +79,19 @@ void __cudampi__updatePowerCap(float v, int i) {
 
   __cudampi__devicePowerConfig[i].currentPowerCap = v;
   setDevicePowerCap(i);
+}
+
+void __cudampi__applyAllPowercaps(void) {
+  // Push configured power caps to devices based on selected strategy
+  if (__cudampi__powercapStrategy == CONTINOUS_EQUAL ||
+      __cudampi__powercapStrategy == EDP_GRADIENT_SIMPLE ||
+      __cudampi__powercapStrategy == EDP_GRADIENT_SPSA) {
+    for (int i = 0; i < __cudampi_totaldevicecount; i++) {
+      if (__cudampi__devicePowerConfig[i].currentPowerCap != -1) {
+        setDevicePowerCap(i);
+      }
+    }
+  }
 }
 
 float __cudampi__gettotalpowerofselecteddevices() { // gets total power of currently enabled devices
@@ -845,15 +859,3 @@ void __cudampi__powercappingManagerStep(void) {
   }
 }
 
-void __cudampi__applyAllPowercaps(void) {
-  // Push configured power caps to devices based on selected strategy
-  if (__cudampi__powercapStrategy == CONTINOUS_EQUAL ||
-      __cudampi__powercapStrategy == EDP_GRADIENT_SIMPLE ||
-      __cudampi__powercapStrategy == EDP_GRADIENT_SPSA) {
-    for (int i = 0; i < __cudampi_totaldevicecount; i++) {
-      if (__cudampi__devicePowerConfig[i].currentPowerCap != -1) {
-        setDevicePowerCap(i);
-      }
-    }
-  }
-}

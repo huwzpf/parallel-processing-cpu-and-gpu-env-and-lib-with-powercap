@@ -127,12 +127,4 @@ void __cudampi__kernelInStream(void *devPtr, cudaStream_t stream, unsigned long 
 
 void __cudampi__kernel(void *devPtr, unsigned long long id);
 
-// Power capping helpers moved to powercap.c
-void __cudampi__powercappingManagerStep(void);
-void __cudampi__applyAllPowercaps(void);
-void __cudampi__loadAndLogPowercapConfig(void);
-void __cudampi__allocAndGatherPowercapRanges(void);
-void __cudampi__initDevicePowercapConfig(void);
-void __cudampi__applyInitialPowercapsForStrategy(void);
-
 #endif
