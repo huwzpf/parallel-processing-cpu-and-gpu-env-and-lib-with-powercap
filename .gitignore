@@ -6,3 +6,4 @@
 *.png
 /python_scripts/__pycache__/
 /python_scripts/venv/
+actparcmaes.par
