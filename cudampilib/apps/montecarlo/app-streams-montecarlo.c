@@ -28,6 +28,10 @@ long long globalcounter = 0;
 
 int streamcount = 1;
 
+// As in the RNN app: simulate a larger problem by iterating over the
+// same allocated buffers multiple times to avoid huge host memory usage.
+#define ITERS 10
+
 int main(int argc, char **argv)
 {
   struct timeval start, stop;
@@ -105,19 +109,24 @@ int main(int argc, char **argv)
     long long local_sync_intervals = 0, local_sync_sum_us = 0;
 
     do {
-      batch_pointer = __cudampi__getnextchunkindex(&globalcounter, VECTORSIZE);
-      if (batch_pointer.start >= VECTORSIZE) {
+      batch_pointer = __cudampi__getnextchunkindex(&globalcounter, ITERS * VECTORSIZE);
+      if (batch_pointer.start >= ITERS * VECTORSIZE) {
         finish = 1;
       } else {
+        // Simulate larger memory by counting up to ITERS*VECTORSIZE while only
+        // VECTORSIZE elements are allocated. Keep batch_pointer within bounds.
+        // (VECTORSIZE - batchsize) is the largest safe start (n_elements <= batchsize).
+        batch_pointer.start = batch_pointer.start % (VECTORSIZE - batchsize);
         __cudampi__memcpyAsync(devSeeds, seeds + batch_pointer.start, batch_pointer.n_elements * sizeof(unsigned int), cudaMemcpyHostToDevice, stream1);
         __cudampi__kernelInStream(devPtr, stream1, 0);
         __cudampi__memcpyAsync(hits + batch_pointer.start, devHits, batch_pointer.n_elements * sizeof(unsigned int), cudaMemcpyDeviceToHost, stream1);
 
         if (streamcount == 2) {
-          batch_pointer = __cudampi__getnextchunkindex(&globalcounter, VECTORSIZE);
-          if (batch_pointer.start >= VECTORSIZE) {
+          batch_pointer = __cudampi__getnextchunkindex(&globalcounter, ITERS * VECTORSIZE);
+          if (batch_pointer.start >= ITERS * VECTORSIZE) {
             finish = 1;
           } else {
+            batch_pointer.start = batch_pointer.start % (VECTORSIZE - batchsize);
             __cudampi__memcpyAsync(devSeeds2, seeds + batch_pointer.start, batch_pointer.n_elements * sizeof(unsigned int), cudaMemcpyHostToDevice, stream2);
             __cudampi__kernelInStream(devPtr2, stream2, 0);
             __cudampi__memcpyAsync(hits + batch_pointer.start, devHits2, batch_pointer.n_elements * sizeof(unsigned int), cudaMemcpyDeviceToHost, stream2);
@@ -126,7 +135,7 @@ int main(int argc, char **argv)
       }
 
       privatecounter++;
-      if (privatecounter % 2) {
+      if (privatecounter % 10 == 0) {
         __cudampi__deviceSynchronize();
         struct timeval now_sync; gettimeofday(&now_sync, NULL);
         if (has_last_sync_time) {
@@ -178,4 +187,3 @@ int main(int argc, char **argv)
   gettimeofday(&stoptotal, NULL);
   log_message(LOG_INFO, "Total elapsed time=%f\n", (double)((stoptotal.tv_sec - starttotal.tv_sec) + (double)(stoptotal.tv_usec - starttotal.tv_usec) / 1000000.0));
 }
-

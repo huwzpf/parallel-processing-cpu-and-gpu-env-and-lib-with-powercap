@@ -49,6 +49,7 @@ extern unsigned long __cudampi__batches_sent[__CUDAMPI_MAX_THREAD_COUNT];
 extern unsigned long long __cudampi__data_points_sent[__CUDAMPI_MAX_THREAD_COUNT];
 extern unsigned long __cudampi__last_batches_sent[__CUDAMPI_MAX_THREAD_COUNT];
 extern unsigned long __cudampi__mgr_batches_sent[__CUDAMPI_MAX_THREAD_COUNT];
+extern unsigned long __cudampi__mgr_data_points_sent[__CUDAMPI_MAX_THREAD_COUNT];
 extern unsigned long long __cudampi__last_data_points_sent[__CUDAMPI_MAX_THREAD_COUNT];
 
 // Batch size / CPU scaling

@@ -17,6 +17,10 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OU
 #include <omp.h>
 #include <string.h>
 #include "cudampi.h"
+// CMA-ES headers (from c-cmaes/src)
+#include "cmaes.h"
+#include "cmaes_interface.h"
+#include "boundary_transformation.h"
 
 typedef struct {
     float min;
@@ -72,6 +76,74 @@ typedef struct {
     double  grad     [__CUDAMPI_MAX_THREAD_COUNT];
 } simpleGradientOpt_t;
 
+typedef struct {
+    /* config */
+    double  eps;                            /* finite-difference step  */
+    double  alpha;                          /* base learning rate      */
+    double  beta1;                          /* Adam m decay            */
+    double  beta2;                          /* Adam v decay            */
+    double  adam_eps;                       /* Adam numerical epsilon  */
+    int     t;                              /* Adam timestep           */
+    simpleGradState_t     mode;
+    int     probe_dim;                      /* which coordinate probe  */
+    /* state */
+    double  base_x   [__CUDAMPI_MAX_THREAD_COUNT];
+    double  base_y   [__CUDAMPI_MAX_THREAD_COUNT];
+    double  grad     [__CUDAMPI_MAX_THREAD_COUNT];
+    double  m        [__CUDAMPI_MAX_THREAD_COUNT];
+    double  v        [__CUDAMPI_MAX_THREAD_COUNT];
+} simpleAdaptiveOpt_t;
+
+typedef struct {
+    /* config */
+    double  eps;                            /* SPSA perturbation step  */
+    double  alpha;                          /* base learning rate      */
+    double  beta1;                          /* Adam m decay            */
+    double  beta2;                          /* Adam v decay            */
+    double  adam_eps;                       /* Adam numerical epsilon  */
+    int     t;                              /* Adam timestep           */
+    spsaState_t mode;                       /* reuse SPSA phases       */
+    /* state */
+    double  base_x   [__CUDAMPI_MAX_THREAD_COUNT];
+    double  delta    [__CUDAMPI_MAX_THREAD_COUNT];
+    double  m        [__CUDAMPI_MAX_THREAD_COUNT];
+    double  v        [__CUDAMPI_MAX_THREAD_COUNT];
+    double  J_plus;
+} spsaAdaptiveOpt_t;
+
+typedef enum {
+    CMA_SAMPLE,
+    CMA_EVAL,
+    CMA_UPDATE
+} cmaesState_t;
+
+#define __CUDAMPI_CMAES_MAX_LAMBDA 256
+
+typedef struct {
+    /* problem size */
+    int n;
+    int lambda;              /* population size */
+    int k;                   /* current candidate index */
+    cmaesState_t mode;
+    int terminated;          /* termination flag from cmaes_TestForTermination */
+    /* CMA-ES engine */
+    cmaes_t evo;
+    /* boundary transformation (maps internal -> bounded caps) */
+    cmaes_boundary_transformation_t bounds;
+    /* bounds for CMA-ES boundary transform (normalized 0..1) */
+    double minv[__CUDAMPI_MAX_THREAD_COUNT];
+    double maxv[__CUDAMPI_MAX_THREAD_COUNT];
+    /* physical bounds in cap units (W) */
+    double phys_minv[__CUDAMPI_MAX_THREAD_COUNT];
+    double phys_maxv[__CUDAMPI_MAX_THREAD_COUNT];
+    /* fitness buffer for one generation */
+    double f[__CUDAMPI_CMAES_MAX_LAMBDA];
+    /* last sampled population pointer (as returned by cmaes_SamplePopulation) */
+    double* const* pop;
+    /* scratch buffer for transformed candidate in bounds */
+    double x_in_bounds[__CUDAMPI_MAX_THREAD_COUNT];
+} cmaesOpt_t;
+
 float computeDevPerformance(double period_us);
 
 float getGPUpower(int gpuid);
@@ -89,5 +161,9 @@ powercapRange_t __cudampi__getGpuPowerCapRange(int gpuid);
 void __cudampi__setGpuPowerCap(int gpuid, float powerCap);
 
 void __cudampi__setCpuPowerCap(float powerCap, unsigned long long timeWindowUs);
+
+// Normalization helpers: map between physical cap range [min,max] and [0,1]
+double __cudampi__cap_to_norm(double cap, double minv, double maxv);
+double __cudampi__norm_to_cap(double p, double minv, double maxv);
 
 #endif // CUDAMPI_COMMON_H

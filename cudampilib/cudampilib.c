@@ -683,9 +683,14 @@ void __cudampi__terminateMPI() {
     MPI_Send(NULL, 0, MPI_CHAR, 1, __cudampi__CUDAMPIFINALIZE, __cudampi__communicators[i]);
   }
 
+  __cudampi__resetLocalPowercaps();
+
   nvmlShutdown();
 
   log_message(LOG_ERROR, "Terminating CUDAMPILIB, Total energy used %lf J", __cudampi__totalEnergyUsed);
+
+  // Cleanup CMA-ES resources if used
+  __cudampi__cmaesCleanup();
 
   for (int i = 0; i < MAX_THREADS; i++) {
     omp_destroy_lock(&cpuEnergyLock[i]);

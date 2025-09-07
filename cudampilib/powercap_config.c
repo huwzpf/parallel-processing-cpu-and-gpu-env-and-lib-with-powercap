@@ -55,6 +55,12 @@ int load_powercap_config(const char *path, powercap_config_t *config) {
                     config->strategy = EDP_GRADIENT_SIMPLE;
                 } else if (strcmp(value, "EDP_GRADIENT_SPSA") == 0) {
                     config->strategy = EDP_GRADIENT_SPSA;
+                } else if (strcmp(value, "EDP_GRADIENT_SPSA_ADAPTIVE") == 0) {
+                    config->strategy = EDP_GRADIENT_SPSA_ADAPTIVE;
+                } else if (strcmp(value, "EDP_GRADIENT_SIMPLE_ADAPTIVE") == 0) {
+                    config->strategy = EDP_GRADIENT_SIMPLE_ADAPTIVE;
+                } else if (strcmp(value, "EDP_GRADIENT_CMAES") == 0) {
+                    config->strategy = EDP_GRADIENT_CMAES;
                 }
             } else if (strcmp(key, "cpu_min_powercap") == 0) {
                 config->cpu_min_powercap = (float)atof(value);

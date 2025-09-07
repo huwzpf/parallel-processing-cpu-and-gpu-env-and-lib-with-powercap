@@ -122,6 +122,24 @@ powercapRange_t __cudampi__getCpuPowerCapRange()
   return range;
 }
 
+// Clamp helper
+static inline double __cudampi__clamp(double v, double lo, double hi) {
+  return v < lo ? lo : (v > hi ? hi : v);
+}
+
+// Map physical cap value in [minv,maxv] to normalized [0,1]
+double __cudampi__cap_to_norm(double cap, double minv, double maxv) {
+  double range = maxv - minv;
+  double p = (cap - minv) / range;
+  return __cudampi__clamp(p, 0.0, 1.0);
+}
+
+// Map normalized p in [0,1] to physical cap in [minv,maxv]
+double __cudampi__norm_to_cap(double p, double minv, double maxv) {
+  double pn = __cudampi__clamp(p, 0.0, 1.0);
+  return minv + pn * (maxv - minv);
+}
+
 powercapRange_t __cudampi__getGpuPowerCapRange(int gpuid)
 {
   powercapRange_t range;
@@ -169,10 +187,9 @@ void nvmlSetGpuPowerCap(int gpuid, float powerCap)
   nvmlReturn_t result;
   nvmlDevice_t nvmlDevice;
   unsigned int powerCap_uw = (unsigned int)powerCap;
-  log_message(LOG_INFO, "Setting GPU %d power cap to %f W", gpuid, powerCap);
   
   char command[256];
-  snprintf(command, sizeof(command), "echo \"kr0pl4everes!t\" | sudo -S nvidia-smi -i %d -pl %u > /dev/null 2>&1", gpuid, powerCap_uw);
+  snprintf(command, sizeof(command), "echo \"password\" | sudo -S nvidia-smi -i %d -pl %u > /dev/null 2>&1", gpuid, powerCap_uw);
   int ret = system(command);
   if (ret != 0) {
     log_message(LOG_ERROR, "Failed to set power cap using nvidia-smi. Command: %s", command);
@@ -249,6 +266,7 @@ int socketSetGpuPowerCap(int gpuid, float powerCap)
 
 void __cudampi__setGpuPowerCap(int gpuid, float powerCap)
 {
+  log_message(LOG_DEBUG, "Setting GPU%d power cap to %f W ", gpuid, powerCap);
   if (socketSetGpuPowerCap(gpuid, powerCap) == 1) {
     nvmlSetGpuPowerCap(gpuid, powerCap);
   }
@@ -258,7 +276,7 @@ void __cudampi__setCpuPowerCap(float powerCap, unsigned long long timeWindowUs)
 {
   unsigned long long powerCap_uw = (unsigned long long)(powerCap * 1e6);
   FILE *file;
-  log_message(LOG_INFO, "Setting CPU power cap to %f W with time window %llu us", powerCap, timeWindowUs);
+  log_message(LOG_DEBUG, "Setting CPU power cap to %f W with time window %llu us", powerCap, timeWindowUs);
 
   // Write the time window
   file = fopen("/sys/class/powercap/intel-rapl:0/constraint_0_time_window_us", "w");

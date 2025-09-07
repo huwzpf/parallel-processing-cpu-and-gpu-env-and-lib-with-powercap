@@ -24,7 +24,10 @@ typedef enum {
   CONTINOUS_EQUAL,
   BINARY_GREEDY,
   EDP_GRADIENT_SIMPLE,
-  EDP_GRADIENT_SPSA
+  EDP_GRADIENT_SPSA,
+  EDP_GRADIENT_SPSA_ADAPTIVE
+  ,EDP_GRADIENT_SIMPLE_ADAPTIVE
+  ,EDP_GRADIENT_CMAES
 } powercapStrategy_t;
 
 extern __global__ void kernel(long *devPtr);
