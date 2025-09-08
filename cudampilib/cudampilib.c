@@ -92,6 +92,16 @@ unsigned long __cudampi__getCurrentBatchSize() {
 // Start measurement of first iteration (between first kernel call and first synchronize call) performance for each device
 // This function starts measurement when first kernel is called and increments amount of processed data with each kernel call
 void __cudampi__recordBatchSizeForDeviceStats(unsigned long batchsize) {
+  // Record application start time on first-ever invocation (globally)
+  if (!__cudampi__appStartTimestampSet) {
+    #pragma omp critical
+    {
+      if (!__cudampi__appStartTimestampSet) {
+        gettimeofday(&__cudampi__appStartTime, NULL);
+        __cudampi__appStartTimestampSet = 1;
+      }
+    }
+  }
   if (!__cudampi__dyanmicCpuBatchSizeScalingEnabled) {
     return;
   }
@@ -926,10 +936,10 @@ cudaError_t __cudampi__deviceSynchronize(void) {
     if (__cudampi__isCpu() && (energy != -1)){
       power = energy / time_in_seconds;
     }
-
-    if (!__cudampi__isCpu() && (energy != -1)) {
-      power += (energy / time_in_seconds);
-    }
+    // TODO: Consider if this should be uncommented
+    // if (!__cudampi__isCpu() && (energy != -1)) {
+    //  power += (energy / time_in_seconds);
+    // }
 
     if (power != (-1)) {
       __cudampi__devicePowerConfig[__cudampi__currentDevice].currentPower = power;

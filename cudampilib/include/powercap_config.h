@@ -15,6 +15,7 @@ typedef struct {
     // Gradient optimisation parameters (used for EDP_GRADIENT_* strategies)
     float start_alpha;           // initial learning rate (default 2.0)
     float alpha_decay;           // learning rate decay per iteration (default 0.99)
+    float epsilon_decay;         // epsilon decay factor per iteration (slow->fast schedule)
     float gradient_opt_eps;      // finite-difference / perturbation step (default 5.0)
     unsigned long long cpu_time_window_us; // CPU power cap time window (microseconds)
 } powercap_config_t;

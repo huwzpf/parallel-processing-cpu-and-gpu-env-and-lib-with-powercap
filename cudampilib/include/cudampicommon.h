@@ -58,27 +58,32 @@ typedef enum {
 
 typedef struct {
     double  eps;                       
+    double  eps0;                      /* initial perturbation step */
     double  alpha;
     spsaState_t     mode;
     double  base_x   [__CUDAMPI_MAX_THREAD_COUNT];
     double  delta   [__CUDAMPI_MAX_THREAD_COUNT];
     double  J_plus;
+    int     iter;                      /* iteration counter */
 } spsaGradientOpt_t;
 
 typedef struct {
     /* config */
     double  eps;                            /* finite-difference step  */
+    double  eps0;                           /* initial finite-diff step*/
     double  alpha;                          /* learning rate           */
     simpleGradState_t     mode;
     int     probe_dim;                      /* which coordinate probe  */ 
     double  base_x   [__CUDAMPI_MAX_THREAD_COUNT];
-    double  base_y   [__CUDAMPI_MAX_THREAD_COUNT];
+    double  base_y;
     double  grad     [__CUDAMPI_MAX_THREAD_COUNT];
+    int     iter;                           /* iteration counter */
 } simpleGradientOpt_t;
 
 typedef struct {
     /* config */
     double  eps;                            /* finite-difference step  */
+    double  eps0;                           /* initial finite-diff step*/
     double  alpha;                          /* base learning rate      */
     double  beta1;                          /* Adam m decay            */
     double  beta2;                          /* Adam v decay            */
@@ -88,7 +93,7 @@ typedef struct {
     int     probe_dim;                      /* which coordinate probe  */
     /* state */
     double  base_x   [__CUDAMPI_MAX_THREAD_COUNT];
-    double  base_y   [__CUDAMPI_MAX_THREAD_COUNT];
+    double  base_y;
     double  grad     [__CUDAMPI_MAX_THREAD_COUNT];
     double  m        [__CUDAMPI_MAX_THREAD_COUNT];
     double  v        [__CUDAMPI_MAX_THREAD_COUNT];
@@ -97,6 +102,7 @@ typedef struct {
 typedef struct {
     /* config */
     double  eps;                            /* SPSA perturbation step  */
+    double  eps0;                           /* initial perturbation    */
     double  alpha;                          /* base learning rate      */
     double  beta1;                          /* Adam m decay            */
     double  beta2;                          /* Adam v decay            */

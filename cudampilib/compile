@@ -10,6 +10,7 @@ PATTERNSEARCH_DIR="patternsearch"
 VECADD_DIR="vecadd"
 VECMAXDIV_DIR="vecmaxdiv"
 MONTECARLO_DIR="montecarlo"
+VISION_DIR="vision"
 
 GENERIC_FLAGS="-I/usr/local/cuda-13.0/targets/x86_64-linux/include -Iinclude -L/usr/local/cuda-13.0/targets/x86_64-linux/lib -lcudart -lstdc++ -lm -Wl,-l:libnvidia-ml.so.1"
 
@@ -46,6 +47,7 @@ nvcc -c $APPS_DIR/$PATTERNSEARCH_DIR/appkernelpatternsearch.cu -o $BUILD_DIR/app
 nvcc -c $APPS_DIR/$TWINPRIME_DIR/appkerneltwinprime.cu -o $BUILD_DIR/appkerneltwinprime.o -Iinclude
 nvcc -c $APPS_DIR/$RNN_DIR/appkernelrnn.cu -o $BUILD_DIR/appkernelrnn.o -Iinclude -lcublas
 nvcc -c $APPS_DIR/$MONTECARLO_DIR/appkernelmontecarlo.cu -o $BUILD_DIR/appkernelmontecarlo.o -Iinclude
+nvcc -c $APPS_DIR/$VISION_DIR/appkernelvision.cu -o $BUILD_DIR/appkernelvision.o -Iinclude
 
 
 mpicc -fopenmp -c $APPS_DIR/$COLLATZ_DIR/cpukernelcollatz.c -Iinclude -o $BUILD_DIR/cpukernelcollatz.o
@@ -55,6 +57,7 @@ mpicc -fopenmp -c $APPS_DIR/$PATTERNSEARCH_DIR/cpukernelpatternsearch.c -Iinclud
 mpicc -fopenmp -c $APPS_DIR/$TWINPRIME_DIR/cpukerneltwinprime.c  -Iinclude -lpthread -lm -o $BUILD_DIR/cpukerneltwinprime.o 
 mpicc -fopenmp -c $APPS_DIR/$RNN_DIR/cpukernelrnn.c -Iinclude -I/opt/intel/oneapi/mkl/latest/include -o $BUILD_DIR/cpukernelrnn.o
 mpicc -fopenmp -O3 -march=native -ffast-math -funroll-loops -c $APPS_DIR/$MONTECARLO_DIR/cpukernelmontecarlo.c -Iinclude -o $BUILD_DIR/cpukernelmontecarlo.o
+mpicc -fopenmp -c $APPS_DIR/$VISION_DIR/cpukernelvision.c -Iinclude -o $BUILD_DIR/cpukernelvision.o
 
 
 #mpicc -fopenmp -o $BUILD_DIR/cudampislave cudampislave.c $BUILD_DIR/appkernel.o $BUILD_DIR/cudampicommon.o -I/usr/local/cuda-13.0/targets/x86_64-linux/include -Iinclude -L/usr/local/cuda-13.0/targets/x86_64-linux/lib -lcudart -lstdc++
@@ -65,6 +68,7 @@ mpicc -fopenmp -o $BUILD_DIR/cudampislave-patternsearch cudampislave.c $BUILD_DI
 mpicc -fopenmp -o $BUILD_DIR/cudampislave-twinprime cudampislave.c $BUILD_DIR/cpukerneltwinprime.o $BUILD_DIR/appkerneltwinprime.o $BUILD_DIR/cudampicommon.o $CC_INC_COMMON $GENERIC_FLAGS
 mpicc -fopenmp -o $BUILD_DIR/cudampislave-rnn cudampislave.c $BUILD_DIR/cpukernelrnn.o $BUILD_DIR/appkernelrnn.o $BUILD_DIR/cudampicommon.o $CC_INC_COMMON $GENERIC_FLAGS -lcublas -I/opt/intel/oneapi/mkl/latest/include -L/opt/intel/oneapi/mkl/latest/lib/intel64 -Wl,-Bstatic -lmkl_intel_lp64 -lmkl_gnu_thread -lmkl_core -Wl,-Bdynamic -lpthread -lm
 mpicc -fopenmp -o $BUILD_DIR/cudampislave-montecarlo cudampislave.c $BUILD_DIR/cpukernelmontecarlo.o $BUILD_DIR/appkernelmontecarlo.o $BUILD_DIR/cudampicommon.o $CC_INC_COMMON $GENERIC_FLAGS
+mpicc -fopenmp -o $BUILD_DIR/cudampislave-vision cudampislave.c $BUILD_DIR/cpukernelvision.o $BUILD_DIR/appkernelvision.o $BUILD_DIR/cudampicommon.o $CC_INC_COMMON $GENERIC_FLAGS
 
 #mpicc -fopenmp -o $BUILD_DIR/app $APPS_DIR/$APP_DIR/app.c $BUILD_DIR/appkernel.o $BUILD_DIR/cudampilib.o $BUILD_DIR/cudampicommon.o -I/usr/local/cuda-13.0/targets/x86_64-linux/include -Iinclude -L/usr/local/cuda-13.0/targets/x86_64-linux/lib -lcudart -lstdc++
 LINK_CMAES="$BUILD_DIR/cmaes.o $BUILD_DIR/boundary_transformation.o"
@@ -75,6 +79,7 @@ mpicc -fopenmp -o $BUILD_DIR/app-streams-patternsearch $APPS_DIR/$PATTERNSEARCH_
 mpicc -fopenmp -o $BUILD_DIR/app-streams-twinprime $APPS_DIR/$TWINPRIME_DIR/app-streams-twinprime.c $BUILD_DIR/cpukerneltwinprime.o $BUILD_DIR/appkerneltwinprime.o $BUILD_DIR/cudampilib.o $BUILD_DIR/cudampicommon.o $BUILD_DIR/powercap_config.o $BUILD_DIR/powercap.o $BUILD_DIR/cudampi_state.o $LINK_CMAES $CC_INC_COMMON $GENERIC_FLAGS
 mpicc -fopenmp -o $BUILD_DIR/app-streams-rnn $APPS_DIR/$RNN_DIR/app-streams-rnn.c $BUILD_DIR/cpukernelrnn.o $BUILD_DIR/appkernelrnn.o $BUILD_DIR/cudampilib.o $BUILD_DIR/cudampicommon.o $BUILD_DIR/powercap_config.o $BUILD_DIR/powercap.o $BUILD_DIR/cudampi_state.o $LINK_CMAES $CC_INC_COMMON $GENERIC_FLAGS -lcublas -I/opt/intel/oneapi/mkl/latest/include -L/opt/intel/oneapi/mkl/latest/lib/intel64 -Wl,-Bstatic -lmkl_intel_lp64 -lmkl_gnu_thread -lmkl_core -Wl,-Bdynamic -lpthread -lm
 mpicc -fopenmp -o $BUILD_DIR/app-streams-montecarlo $APPS_DIR/$MONTECARLO_DIR/app-streams-montecarlo.c $BUILD_DIR/cpukernelmontecarlo.o $BUILD_DIR/appkernelmontecarlo.o $BUILD_DIR/cudampilib.o $BUILD_DIR/cudampicommon.o $BUILD_DIR/powercap_config.o $BUILD_DIR/powercap.o $BUILD_DIR/cudampi_state.o $LINK_CMAES $CC_INC_COMMON $GENERIC_FLAGS
+mpicc -fopenmp -o $BUILD_DIR/app-streams-vision $APPS_DIR/$VISION_DIR/app-streams-vision.c $BUILD_DIR/cpukernelvision.o $BUILD_DIR/appkernelvision.o $BUILD_DIR/cudampilib.o $BUILD_DIR/cudampicommon.o $BUILD_DIR/powercap_config.o $BUILD_DIR/powercap.o $BUILD_DIR/cudampi_state.o $LINK_CMAES $CC_INC_COMMON $GENERIC_FLAGS
 
 
 echo "Build complete. Executables and object files are in '$BUILD_DIR'."

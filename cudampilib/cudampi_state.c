@@ -63,3 +63,7 @@ unsigned long __cudampi__cpu_batch_size;
 float __cudampi__cpu_power_scaling;
 int __cudampi__cpu_enabled;
 
+// Optimizer sync period and app start timestamp
+double __cudampi__optimizerSyncPeriod = 0.0; // seconds
+int __cudampi__appStartTimestampSet = 0;
+struct timeval __cudampi__appStartTime;

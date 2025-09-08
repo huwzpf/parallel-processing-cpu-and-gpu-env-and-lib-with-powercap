@@ -73,5 +73,9 @@ extern int __cudampi__dyanmicCpuBatchSizeScalingEnabled;
 // Energy
 extern double __cudampi__totalEnergyUsed;
 
-#endif // CUDAMPI_STATE_H
+// Optimizer sync period and app start timestamp
+extern double __cudampi__optimizerSyncPeriod; // seconds between optimizer syncs
+extern int __cudampi__appStartTimestampSet;   // 1 once set globally
+extern struct timeval __cudampi__appStartTime; // time of first batch record
 
+#endif // CUDAMPI_STATE_H

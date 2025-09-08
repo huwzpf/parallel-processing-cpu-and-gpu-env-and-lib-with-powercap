@@ -25,6 +25,7 @@ int load_powercap_config(const char *path, powercap_config_t *config) {
     config->global_powercap = 0.0f; // disabled by default
     config->start_alpha = 2.0f;     // default START_ALPHA
     config->alpha_decay = 0.99f;    // default ALPHA_DECAY
+    config->epsilon_decay = 0.99f;  // default EPSILON_DECAY
     config->gradient_opt_eps = 5.0f;// default GRADIENT_OPT_EPS
     // Default CPU time window: 1 second (microseconds)
     config->cpu_time_window_us = 1000000ULL;
@@ -49,6 +50,8 @@ int load_powercap_config(const char *path, powercap_config_t *config) {
                     config->strategy = DISABLED;
                 } else if (strcmp(value, "CONTINOUS_EQUAL") == 0) {
                     config->strategy = CONTINOUS_EQUAL;
+                } else if (strcmp(value, "EQUAL_SPLIT") == 0) {
+                    config->strategy = EQUAL_SPLIT;
                 } else if (strcmp(value, "BINARY_GREEDY") == 0) {
                     config->strategy = BINARY_GREEDY;
                 } else if (strcmp(value, "EDP_GRADIENT_SIMPLE") == 0) {
@@ -72,6 +75,8 @@ int load_powercap_config(const char *path, powercap_config_t *config) {
                 config->start_alpha = (float)atof(value);
             } else if (strcmp(key, "alpha_decay") == 0) {
                 config->alpha_decay = (float)atof(value);
+            } else if (strcmp(key, "epsilon_decay") == 0) {
+                config->epsilon_decay = (float)atof(value);
             } else if (strcmp(key, "gradient_opt_eps") == 0) {
                 config->gradient_opt_eps = (float)atof(value);
             } else if (strcmp(key, "global_powercap") == 0) {
