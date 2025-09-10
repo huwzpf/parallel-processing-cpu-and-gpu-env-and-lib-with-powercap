@@ -78,13 +78,9 @@ static void run_cnn(void* devPtr, unsigned long B, cudaStream_t stream)
 #endif
     cudnnSetActivationDescriptor(actDesc, CUDNN_ACTIVATION_RELU, CUDNN_NOT_PROPAGATE_NAN, 0.0);
 
-    // Pick algorithms and workspace sizes
-    cudnnConvolutionFwdAlgoPerf_t perf0, perfH;
-    int returnedAlgoCount = 0;
-    cudnnFindConvolutionForwardAlgorithm(handle, inDesc0, filt0Desc, conv0Desc, hidDesc, 1, &returnedAlgoCount, &perf0);
-    cudnnFindConvolutionForwardAlgorithm(handle, hidDesc,  filthDesc, convHDesc, hidDesc, 1, &returnedAlgoCount, &perfH);
-    cudnnConvolutionFwdAlgo_t algo0 = perf0.algo;
-    cudnnConvolutionFwdAlgo_t algoH = perfH.algo;
+    // Pick fixed algorithms to avoid runtime fluctuations
+    cudnnConvolutionFwdAlgo_t algo0 = CUDNN_CONVOLUTION_FWD_ALGO_IMPLICIT_PRECOMP_GEMM;
+    cudnnConvolutionFwdAlgo_t algoH = CUDNN_CONVOLUTION_FWD_ALGO_IMPLICIT_PRECOMP_GEMM;
     size_t ws0 = 0, wsH = 0;
     cudnnGetConvolutionForwardWorkspaceSize(handle, inDesc0, filt0Desc, conv0Desc, hidDesc, algo0, &ws0);
     cudnnGetConvolutionForwardWorkspaceSize(handle, hidDesc,  filthDesc, convHDesc, hidDesc, algoH, &wsH);
@@ -154,10 +150,8 @@ static void run_cnn(void* devPtr, unsigned long B, cudaStream_t stream)
     cudnnSetTensor4dDescriptor(fcInDesc,  CUDNN_TENSOR_NCHW, CUDNN_DATA_FLOAT, (int)B, Ch, 1, 1);
     cudnnSetTensor4dDescriptor(fcOutDesc, CUDNN_TENSOR_NCHW, CUDNN_DATA_FLOAT, (int)B, CLS, 1, 1);
 
-    cudnnConvolutionFwdAlgoPerf_t fcPerf;
-    int fcReturned = 0;
-    cudnnFindConvolutionForwardAlgorithm(handle, fcInDesc, fcFilt, fcConv, fcOutDesc, 1, &fcReturned, &fcPerf);
-    cudnnConvolutionFwdAlgo_t fcAlgo = fcPerf.algo;
+    // Fixed algo for FC (1x1 conv)
+    cudnnConvolutionFwdAlgo_t fcAlgo = CUDNN_CONVOLUTION_FWD_ALGO_IMPLICIT_GEMM;
     size_t wsF = 0; cudnnGetConvolutionForwardWorkspaceSize(handle, fcInDesc, fcFilt, fcConv, fcOutDesc, fcAlgo, &wsF);
     if (wsF > ws_cap) {
         fcAlgo = CUDNN_CONVOLUTION_FWD_ALGO_IMPLICIT_GEMM;

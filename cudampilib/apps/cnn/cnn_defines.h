@@ -16,7 +16,7 @@ Adjust these macros as needed to change the workload.
 
 // Convolution
 #define CNN_KERNEL_SIZE 7          // square kernel KxK
-#define CNN_LAYERS 50               // number of stacked conv layers (same weights for inner layers)
+#define CNN_LAYERS 16               // number of stacked conv layers (same weights for inner layers)
 
 // Classifier
 #define CNN_CLASSES 4096
