@@ -9,8 +9,10 @@ Runs multi-layer CNN forward pass on GPU; CPU path is disabled (no-op).
 #include <stdlib.h>
 #include <assert.h>
 #include <sys/time.h>
+#include <unistd.h>
 
 #define ENABLE_LOGGING
+#define MPI_LOGGING
 #include "logger.h"
 #include "cnn_defines.h"
 
@@ -22,13 +24,43 @@ struct __cudampi__arguments_type __cudampi__arguments;
 long long VECTORSIZE;
 
 float *vectora; // inputs [VECTORSIZE, INPUT_BATCH_SIZE]
+float *vectorb; // inputs [VECTORSIZE, INPUT_BATCH_SIZE]
 float *vectorc; // outputs [VECTORSIZE, OUTPUT_BATCH_SIZE]
 float *vectork; // weights  [WEIGHTS_SIZE]
 
 unsigned long batchsize;
 
-long long globalcounter = 0;
+long long globalcounter1 = 0;
+long long globalcounter2 = 0;
+long long batchCounter = 0;
+omp_lock_t batchCounterLock;
 int streamcount = 1;
+
+int consumeBatch() {
+  int ret = 0;
+  omp_set_lock(&batchCounterLock);
+  if (batchCounter > 0) {
+    batchCounter -= 1;
+    ret = 1;
+    log_message(LOG_INFO, "Consumed a batch");
+  }
+  omp_unset_lock(&batchCounterLock);
+
+  return ret;
+}
+
+void waitForBatch() {
+  while(!consumeBatch()) {
+    usleep(100);
+  }
+}
+
+void produceBatches(long long count) {
+  omp_set_lock(&batchCounterLock);
+  batchCounter += count;
+  omp_unset_lock(&batchCounterLock);
+}
+
 
 int main(int argc, char **argv)
 {
@@ -51,6 +83,12 @@ int main(int argc, char **argv)
   // Host allocations (pinned for faster transfer)
   cudaHostAlloc((void **)&vectora, sizeof(float) * VECTORSIZE * INPUT_BATCH_SIZE, cudaHostAllocDefault);
   if (!vectora)
+  {
+    log_message(LOG_ERROR, "Not enough memory for input.");
+    exit(-1);
+  }
+  cudaHostAlloc((void **)&vectorb, sizeof(float) * VECTORSIZE * INPUT_BATCH_SIZE, cudaHostAllocDefault);
+  if (!vectorb)
   {
     log_message(LOG_ERROR, "Not enough memory for input.");
     exit(-1);
@@ -82,13 +120,7 @@ int main(int argc, char **argv)
   {
     __cudampi__batch_pointer batch_pointer;
     int finish = 0;
-    void *devPtra = NULL, *devPtrc = NULL;
-    void *devPtrk = NULL, *devPtrb = NULL;
-    void *devPtrw = NULL; // workspace buffer
     void *devPtr = NULL; // device pointer to pointer array
-    void *devPtra2 = NULL, *devPtrc2 = NULL;
-    void *devPtrk2 = NULL, *devPtrb2 = NULL;
-    void *devPtrw2 = NULL; // workspace buffer for stream2
     void *devPtr2 = NULL; // second pointer array for stream2
     cudaStream_t stream;
     cudaStream_t stream2;
@@ -99,10 +131,84 @@ int main(int argc, char **argv)
     #pragma omp barrier
 
     if (__cudampi__isCpu()) {
-      // CPU thread: do nothing (no allocations, no copies, no kernel)
-      // Just skip work so GPUs consume the batches.
+      void *devPtra = NULL, *devPtrb = NULL;
+      void *devPtra2 = NULL, *devPtrb2 = NULL;
+      
+      __cudampi__streamCreate(&stream);
+      __cudampi__malloc(&devPtra, INPUT_BATCH_SIZE * batchsize * sizeof(float));
+      if (!devPtra) { log_message(LOG_ERROR, "[T%d] Not enough memory (devPtra).", mythreadid); exit(-1);}  
+      __cudampi__malloc(&devPtrb, INPUT_BATCH_SIZE * batchsize * sizeof(float));
+      if (!devPtrb) { log_message(LOG_ERROR, "[T%d] Not enough memory (devPtrb).", mythreadid); exit(-1);} 
+      __cudampi__malloc(&devPtr, 2 * sizeof(void *));
+      if (!devPtr) {log_message(LOG_ERROR, "\nNot enough memory (devptr)."); exit(-1);}
+
+      if (streamcount == 2) {
+        __cudampi__streamCreate(&stream2);
+        __cudampi__malloc(&devPtra2, INPUT_BATCH_SIZE * batchsize * sizeof(float));
+        if (!devPtra2) { log_message(LOG_ERROR, "[T%d] Not enough memory (devPtra2).", mythreadid); exit(-1);}  
+        __cudampi__malloc(&devPtrb2, INPUT_BATCH_SIZE * batchsize * sizeof(float));
+        if (!devPtrb2) { log_message(LOG_ERROR, "[T%d] Not enough memory (devPtrb2).", mythreadid); exit(-1);}   
+        __cudampi__malloc(&devPtr2, 2 * sizeof(void *));
+        if (!devPtr2) {log_message(LOG_ERROR, "\nNot enough memory (devptr2)."); exit(-1);}
+      } 
+      // Send device argument pointers
+      __cudampi__memcpyAsync(devPtr, &devPtra, sizeof(void *), cudaMemcpyHostToDevice, stream);
+      __cudampi__memcpyAsync(devPtr + sizeof(void *), &devPtrb, sizeof(void *), cudaMemcpyHostToDevice, stream);
+      if (streamcount == 2) {
+        __cudampi__memcpyAsync(devPtr2, &devPtra2, sizeof(void *), cudaMemcpyHostToDevice, stream2);
+        __cudampi__memcpyAsync(devPtr2 + sizeof(void *), &devPtrb2, sizeof(void *), cudaMemcpyHostToDevice, stream2);
+      }
+
+      do {
+        batch_pointer = __cudampi__getnextchunkindex(&globalcounter1, ITERS * VECTORSIZE);
+        if (batch_pointer.start >= ITERS * VECTORSIZE) {
+          finish = 1;
+        } else {
+          batch_pointer.start = batch_pointer.start % (VECTORSIZE - batchsize);
+          __cudampi__memcpyAsync(devPtra, vectora + (batch_pointer.start * INPUT_BATCH_SIZE), batch_pointer.n_elements * INPUT_BATCH_SIZE * sizeof(float), cudaMemcpyHostToDevice, stream);
+          __cudampi__kernelInStream(devPtr, stream, 0);
+          __cudampi__memcpyAsync(vectorb + (batch_pointer.start * INPUT_BATCH_SIZE), devPtrb, batch_pointer.n_elements * INPUT_BATCH_SIZE * sizeof(float), cudaMemcpyDeviceToHost, stream);
+
+          if (streamcount == 2) {
+            batch_pointer = __cudampi__getnextchunkindex(&globalcounter1, ITERS * VECTORSIZE);
+            if (batch_pointer.start >= ITERS * VECTORSIZE) {
+              finish = 1;
+            } else {
+              batch_pointer.start = batch_pointer.start % (VECTORSIZE - batchsize);
+              __cudampi__memcpyAsync(devPtra2, vectora + (batch_pointer.start * INPUT_BATCH_SIZE), batch_pointer.n_elements * INPUT_BATCH_SIZE * sizeof(float), cudaMemcpyHostToDevice, stream2);
+              __cudampi__kernelInStream(devPtr2, stream2, 0);
+              __cudampi__memcpyAsync(vectorb + (batch_pointer.start * INPUT_BATCH_SIZE), devPtrb2, batch_pointer.n_elements * INPUT_BATCH_SIZE * sizeof(float), cudaMemcpyDeviceToHost, stream2);
+            }
+          }
+        }
+
+        privatecounter++;
+        if (privatecounter % 2 == 0) {
+          __cudampi__deviceSynchronize();
+          log_message(LOG_INFO, "Produced batches");
+          produceBatches(2 * streamcount);
+        }
+      } while (!finish);
+
+      __cudampi__deviceSynchronize();
+      __cudampi__streamDestroy(stream);
+      __cudampi__free(devPtr);
+      __cudampi__free(devPtra);
+      __cudampi__free(devPtrb);
+      if (streamcount == 2) {
+        __cudampi__streamDestroy(stream2);
+        __cudampi__free(devPtr2);
+        __cudampi__free(devPtra2);
+        __cudampi__free(devPtrb2);
+      }
     } else {
       // GPU thread path
+      void *devPtra = NULL, *devPtrc = NULL;
+      void *devPtrk = NULL, *devPtrb = NULL;
+      void *devPtrw = NULL; // workspace buffer
+      void *devPtra2 = NULL, *devPtrc2 = NULL;
+      void *devPtrk2 = NULL, *devPtrb2 = NULL;
+      void *devPtrw2 = NULL; // workspace buffer for stream2
       __cudampi__malloc(&devPtra, INPUT_BATCH_SIZE * batchsize * sizeof(float));
       if (!devPtra) { log_message(LOG_ERROR, "[T%d] Not enough memory (devPtra).", mythreadid); exit(-1);}    
       __cudampi__malloc(&devPtrc, OUTPUT_BATCH_SIZE * batchsize * sizeof(float));
@@ -159,16 +265,17 @@ int main(int argc, char **argv)
       }
 
       do {
-        batch_pointer = __cudampi__getnextchunkindex(&globalcounter, ITERS * VECTORSIZE);
+        batch_pointer = __cudampi__getnextchunkindex(&globalcounter2, ITERS * VECTORSIZE);
         if (batch_pointer.start >= ITERS * VECTORSIZE) {
           finish = 1;
         } else {
+          waitForBatch();
           // Map the virtual index space to the real buffer range
           batch_pointer.start = batch_pointer.start % (VECTORSIZE - batchsize);
           // Copy inputs for this chunk
           __cudampi__memcpyAsync(
             devPtra,
-            vectora + (batch_pointer.start * INPUT_BATCH_SIZE),
+            vectorb + (batch_pointer.start * INPUT_BATCH_SIZE),
             batch_pointer.n_elements * INPUT_BATCH_SIZE * sizeof(float),
             cudaMemcpyHostToDevice,
             stream);
@@ -186,14 +293,15 @@ int main(int argc, char **argv)
 
           if (streamcount == 2) {
             // Schedule second chunk to stream2
-            batch_pointer = __cudampi__getnextchunkindex(&globalcounter, ITERS * VECTORSIZE);
+            batch_pointer = __cudampi__getnextchunkindex(&globalcounter2, ITERS * VECTORSIZE);
             if (batch_pointer.start >= ITERS * VECTORSIZE) {
               finish = 1;
             } else {
+              waitForBatch();
               batch_pointer.start = batch_pointer.start % (VECTORSIZE - batchsize);
               __cudampi__memcpyAsync(
                 devPtra2,
-                vectora + (batch_pointer.start * INPUT_BATCH_SIZE),
+                vectorb + (batch_pointer.start * INPUT_BATCH_SIZE),
                 batch_pointer.n_elements * INPUT_BATCH_SIZE * sizeof(float),
                 cudaMemcpyHostToDevice,
                 stream2);
@@ -232,6 +340,7 @@ int main(int argc, char **argv)
         if (devPtrw2) __cudampi__free(devPtrw2);
       }
     }
+    log_message(LOG_INFO, "[T%d] Finished", mythreadid);
   }
 
   gettimeofday(&stop, NULL);
@@ -243,6 +352,7 @@ int main(int argc, char **argv)
   // save_vector_output_double(vectorc, VECTORSIZE, "CNN_logs_cpugpuasyncfull.log", "CPUGPUASYNC");
 
   cudaFreeHost(vectora);
+  cudaFreeHost(vectorb);
   cudaFreeHost(vectorc);
   cudaFreeHost(vectork);
 
