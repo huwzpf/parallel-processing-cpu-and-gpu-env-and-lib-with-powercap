@@ -22,16 +22,16 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OU
 
 void appkernel(void *devPtr, int num_elements, int num_threads) 
 {
-  double *devPtra = (double *)(((void **)devPtr)[0]);
-  double *devPtrb = (double *)(((void **)devPtr)[1]);
-  double *devPtrc = (double *)(((void **)devPtr)[2]);
+  float *devPtra = (float *)(((void **)devPtr)[0]);
+  float *devPtrb = (float *)(((void **)devPtr)[1]);
+  float *devPtrc = (float *)(((void **)devPtr)[2]);
 
   #pragma omp parallel for num_threads(num_threads)
 for (long my_index = 0 ; my_index < num_elements; my_index++)
 {
     long i;
     long result = 1;
-    long max = sqrt(devPtra[my_index]);
+    long max = sqrtf(devPtra[my_index]);
     long elem = devPtra[my_index];
     for (i = 2; i < max; i++) 
     {
@@ -43,7 +43,7 @@ for (long my_index = 0 ; my_index < num_elements; my_index++)
             }
         }
     }
-    max = sqrt(devPtrb[my_index]);
+    max = sqrtf(devPtrb[my_index]);
     elem = devPtrb[my_index];
     for (i = 2; i < max; i++) 
     {
@@ -65,4 +65,3 @@ extern void launchcpukernel(void *devPtr, unsigned long batchSize, int num_threa
     log_message(LOG_DEBUG, "Launichng CPU Kernel with %i elements and %i threads.", num_elements, num_threads);
     appkernel(devPtr, num_elements, num_threads);
 }
-

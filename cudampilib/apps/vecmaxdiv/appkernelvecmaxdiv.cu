@@ -24,15 +24,15 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OU
 #include "vecmaxdiv_defines.h"
 
 __global__ void appkernel(void *devPtr) {
-  double *devPtra = (double *)(((void **)devPtr)[0]);
-  double *devPtrb = (double *)(((void **)devPtr)[1]);
-  double *devPtrc = (double *)(((void **)devPtr)[2]);
+  float *devPtra = (float *)(((void **)devPtr)[0]);
+  float *devPtrb = (float *)(((void **)devPtr)[1]);
+  float *devPtrc = (float *)(((void **)devPtr)[2]);
 
   long my_index = blockIdx.x * blockDim.x + threadIdx.x;
   long i;
   long result = 1;
 
-  long max = sqrt(devPtra[my_index]);
+  long max = sqrtf(devPtra[my_index]);
   long elem = devPtra[my_index];
   for (i = 2; i < max; i++) {
     if (!(elem % i)) {
@@ -42,7 +42,7 @@ __global__ void appkernel(void *devPtr) {
     }
   }
 
-  max = sqrt(devPtrb[my_index]);
+  max = sqrtf(devPtrb[my_index]);
   elem = devPtrb[my_index];
   for (i = 2; i < max; i++) {
     if (!(elem % i)) {

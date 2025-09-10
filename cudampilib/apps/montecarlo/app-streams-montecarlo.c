@@ -30,7 +30,7 @@ int streamcount = 1;
 
 // As in the RNN app: simulate a larger problem by iterating over the
 // same allocated buffers multiple times to avoid huge host memory usage.
-#define ITERS 25
+#define ITERS 1
 
 int main(int argc, char **argv)
 {
