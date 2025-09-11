@@ -29,6 +29,8 @@ int load_powercap_config(const char *path, powercap_config_t *config) {
     config->gradient_opt_eps = 5.0f;// default GRADIENT_OPT_EPS
     // Default CPU time window: 1 second (microseconds)
     config->cpu_time_window_us = 1000000ULL;
+    // Default: unlimited EDP optimisation steps
+    config->edp_optimization_steps = 0ULL;
 
     FILE *f = fopen(path, "r");
     if (!f) {
@@ -86,6 +88,9 @@ int load_powercap_config(const char *path, powercap_config_t *config) {
             } else if (strcmp(key, "cpu_time_window_us") == 0) {
                 // microseconds
                 config->cpu_time_window_us = (unsigned long long)strtoull(value, NULL, 10);
+            } else if (strcmp(key, "edp_optimization_steps") == 0) {
+                // number of dynamic optimisation updates (0 means unlimited)
+                config->edp_optimization_steps = (unsigned long long)strtoull(value, NULL, 10);
             }
             // Unknown keys are ignored to keep parser extendable
         }

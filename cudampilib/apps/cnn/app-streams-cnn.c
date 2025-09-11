@@ -18,6 +18,9 @@ Runs multi-layer CNN forward pass on GPU; CPU path is disabled (no-op).
 #define ENABLE_OUTPUT_LOGS
 #include "utility.h"
 
+// Repeat data ITERS times to simulate larger memory usage without allocating it all
+#define ITERS 20
+
 struct __cudampi__arguments_type __cudampi__arguments;
 
 long long VECTORSIZE;
@@ -79,8 +82,6 @@ int main(int argc, char **argv)
   streamcount = __cudampi__arguments.number_of_streams;
   batchsize = __cudampi__arguments.batch_size;
   VECTORSIZE = CNN_VECTORSIZE;
-  // Repeat data ITERS times to simulate larger memory usage without allocating it all
-  #define ITERS 5
 
   int alldevicescount = 0;
   __cudampi__getDeviceCount(&alldevicescount);

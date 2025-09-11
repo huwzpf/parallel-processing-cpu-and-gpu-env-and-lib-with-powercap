@@ -18,6 +18,8 @@ typedef struct {
     float epsilon_decay;         // epsilon decay factor per iteration (slow->fast schedule)
     float gradient_opt_eps;      // finite-difference / perturbation step (default 5.0)
     unsigned long long cpu_time_window_us; // CPU power cap time window (microseconds)
+    // Limit the number of dynamic optimisation updates (0 = unlimited)
+    unsigned long long edp_optimization_steps;
 } powercap_config_t;
 
 // Loads configuration from a simple key=value file.
