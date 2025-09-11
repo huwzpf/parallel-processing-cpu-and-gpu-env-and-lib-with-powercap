@@ -7,5 +7,5 @@
 /python_scripts/__pycache__/
 /python_scripts/venv/
 actparcmaes.par
-hostfile
-temp_hostfile
+cudampilib/hostfile
+cudampilib/temp_hostfile

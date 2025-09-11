@@ -108,7 +108,6 @@ void __cudampi__applyAllPowercaps(void) {
       __cudampi__powercapStrategy == EQUAL_SPLIT ||
       __cudampi__powercapStrategy == EDP_GRADIENT_SIMPLE ||
       __cudampi__powercapStrategy == EDP_GRADIENT_SPSA ||
-      __cudampi__powercapStrategy == EDP_GRADIENT_SPSA_ADAPTIVE ||
       __cudampi__powercapStrategy == EDP_GRADIENT_SIMPLE_ADAPTIVE ||
       __cudampi__powercapStrategy == EDP_GRADIENT_CMAES) {
     for (int i = 0; i < __cudampi_totaldevicecount; i++) {
@@ -534,68 +533,6 @@ void __cudampi__gradientOptStepSpsa() {
   }
 }
 
-//
-// Adam-style adaptive step with SPSA gradient estimate
-// Two probes per iteration (dimension independent), then Adam update.
-//
-void __cudampi__gradientOptStepSpsaAdaptive() {
-  const int n = __cudampi_totaldevicecount;
-  spsaAdaptiveOpt_t* g = &__cudampi__spsaAdaptiveOpt;
-
-  switch (g->mode) {
-    case PROBE_PLUS:
-      log_message(LOG_INFO, "Adaptive optimisation: entering PLUS_PROBE phase");
-      for (int i = 0; i < n; ++i) {
-        g->base_x[i] = (double)__cudampi__devicePowerConfig[i].currentPowerCap;
-        g->delta[i] = (rand() & 1) ? 1.0 : -1.0;  // Rademacher +-1
-        double v = g->base_x[i] + (g->eps * g->delta[i]);
-        log_message(LOG_INFO, "ADAPTIVE PROBE_PLUS: [%d] %f -> %f", i, __cudampi__devicePowerConfig[i].currentPowerCap, v);
-        __cudampi__updatePowerCap((float)v, i);
-      }
-      g->mode = PROBE_MINUS;
-      return;
-    case PROBE_MINUS:
-      log_message(LOG_INFO, "Adaptive optimisation: entering PROBE_MINUS phase");
-      g->J_plus = __cudampi__edp;
-      for (int i = 0; i < n; ++i) {
-        double v = g->base_x[i] - (g->eps * g->delta[i]);
-        log_message(LOG_INFO, "ADAPTIVE PROBE_MINUS: [%d] %f -> %f", i, __cudampi__devicePowerConfig[i].currentPowerCap, v);
-        __cudampi__updatePowerCap((float)v, i);
-      }
-      g->mode = DESCENT;
-      return;
-    case DESCENT:
-      log_message(LOG_INFO, "Adaptive optimisation: entering DESCENT phase");
-      {
-        double J_minus = __cudampi__edp;
-        g->t += 1;
-        const double b1t = pow(g->beta1, g->t);
-        const double b2t = pow(g->beta2, g->t);
-        for (int i = 0; i < n; ++i) {
-          const double grad_i = (g->J_plus - J_minus) / (2.0 * g->eps * g->delta[i]);
-          // Adam moments
-          g->m[i] = g->beta1 * g->m[i] + (1.0 - g->beta1) * grad_i;
-          g->v[i] = g->beta2 * g->v[i] + (1.0 - g->beta2) * (grad_i * grad_i);
-          const double mhat = g->m[i] / (1.0 - b1t);
-          const double vhat = g->v[i] / (1.0 - b2t);
-          const double step = g->alpha * (mhat / (sqrt(vhat) + g->adam_eps));
-          const double vcap = g->base_x[i] - step;
-          log_message(LOG_INFO, "ADAPTIVE DESCENT: [%d] %f -> %f (grad=%lf, step=%lf)", i, __cudampi__devicePowerConfig[i].currentPowerCap, vcap, grad_i, step);
-          __cudampi__updatePowerCap((float)vcap, i);
-        }
-        g->alpha *= __cudampi__gradient_alpha_decay;
-        // Update epsilon with slow-then-fast decay based on Adam timestep
-        g->eps = g->eps0 * pow((double)__cudampi__epsilon_decay, (double)(g->t));
-        log_message(LOG_INFO, "SPSA-ADAPTIVE: iter=%d eps=%.6f", g->t, g->eps);
-        g->mode = PROBE_PLUS;
-      }
-      return;
-    default:
-      log_message(LOG_ERROR, "Adaptive optimisation: invalid mode %d", g->mode);
-      return;
-  }
-}
-
 /* CMA-ES boundary handling is done via cmaes_boundary_transformation.
  * The previous custom sigmoid/logit mapping is superseded by that. */
 
@@ -850,8 +787,6 @@ int __cudampi__selectpowercap_gradient() {
     __cudampi__gradientOptStepSimple();
   } else if (__cudampi__powercapStrategy == EDP_GRADIENT_SPSA) {
     __cudampi__gradientOptStepSpsa();
-  } else if (__cudampi__powercapStrategy == EDP_GRADIENT_SPSA_ADAPTIVE) {
-    __cudampi__gradientOptStepSpsaAdaptive();
   } else if (__cudampi__powercapStrategy == EDP_GRADIENT_SIMPLE_ADAPTIVE) {
     __cudampi__gradientOptStepSimpleAdaptive();
   } else if (__cudampi__powercapStrategy == EDP_GRADIENT_CMAES) {
@@ -1236,7 +1171,7 @@ void __cudampi__loadAndLogPowercapConfig(void) {
       // EQUAL_SPLIT uses start_powercap per device; no global cap
       __cudampi__globalpowerlimit = 0;
       __cudampi__gradient_opt_start_powercap = file_config.start_powercap;
-    } else if (file_config.strategy == EDP_GRADIENT_SIMPLE || file_config.strategy == EDP_GRADIENT_SPSA || file_config.strategy == EDP_GRADIENT_SPSA_ADAPTIVE || file_config.strategy == EDP_GRADIENT_CMAES || file_config.strategy == EDP_GRADIENT_SIMPLE_ADAPTIVE) {
+    } else if (file_config.strategy == EDP_GRADIENT_SIMPLE || file_config.strategy == EDP_GRADIENT_SPSA || file_config.strategy == EDP_GRADIENT_CMAES || file_config.strategy == EDP_GRADIENT_SIMPLE_ADAPTIVE) {
       __cudampi__globalpowerlimit = 0;
       __cudampi__gradient_opt_start_powercap = file_config.start_powercap;
       __cudampi__gradient_start_alpha = file_config.start_alpha;
@@ -1286,10 +1221,6 @@ void __cudampi__loadAndLogPowercapConfig(void) {
       break;
     case EDP_GRADIENT_SPSA:
       log_message(LOG_INFO, "Powercap strategy: EDP_GRADIENT_SPSA");
-      log_message(LOG_INFO, "Gradient params: start_alpha=%f, alpha_decay=%f, eps=%f", __cudampi__gradient_start_alpha, __cudampi__gradient_alpha_decay, __cudampi__gradient_opt_eps);
-      break;
-    case EDP_GRADIENT_SPSA_ADAPTIVE:
-      log_message(LOG_INFO, "Powercap strategy: EDP_GRADIENT_SPSA_ADAPTIVE (Adam + SPSA)");
       log_message(LOG_INFO, "Gradient params: start_alpha=%f, alpha_decay=%f, eps=%f", __cudampi__gradient_start_alpha, __cudampi__gradient_alpha_decay, __cudampi__gradient_opt_eps);
       break;
     case EDP_GRADIENT_SIMPLE_ADAPTIVE:
@@ -1421,7 +1352,6 @@ void __cudampi__applyInitialPowercapsForStrategy(void) {
   if (
       __cudampi__powercapStrategy == EDP_GRADIENT_SIMPLE ||
       __cudampi__powercapStrategy == EDP_GRADIENT_SPSA ||
-      __cudampi__powercapStrategy == EDP_GRADIENT_SPSA_ADAPTIVE ||
       __cudampi__powercapStrategy == EDP_GRADIENT_SIMPLE_ADAPTIVE ||
       __cudampi__powercapStrategy == EDP_GRADIENT_CMAES) {
     for (int i = 0; i < __cudampi_totaldevicecount; i++) {
@@ -1531,7 +1461,6 @@ void __cudampi__powercappingManagerStep(void) {
   else if (
       __cudampi__powercapStrategy == EDP_GRADIENT_SIMPLE ||
       __cudampi__powercapStrategy == EDP_GRADIENT_SPSA ||
-      __cudampi__powercapStrategy == EDP_GRADIENT_SPSA_ADAPTIVE ||
       __cudampi__powercapStrategy == EDP_GRADIENT_SIMPLE_ADAPTIVE ||
       __cudampi__powercapStrategy == EDP_GRADIENT_CMAES) {
     // log_message(LOG_INFO, "EDP Gradient Optimization: Checking if all devices have completed their last batch.");
@@ -1572,7 +1501,7 @@ void __cudampi__powercappingManagerStep(void) {
 
       // Calculate EDP based on combined power and total time
       // calculate edp per data point, but scale it by batch size to keep values in reasonable range
-      __cudampi__edp = (__cudampi__default_batch_size * combinedPower * period_sec) / ((double)combinedDataPoints);
+      __cudampi__edp = (combinedPower * period_sec) / ((double)combinedDataPoints);
       log_message(LOG_DEBUG, "EDP Gradient Optimization: All devices have completed their last batch.");
       log_message(LOG_DEBUG, "  Combined Power: %f W", combinedPower);
       log_message(LOG_DEBUG, "  Time since last optimization step: %f s", period_sec);
