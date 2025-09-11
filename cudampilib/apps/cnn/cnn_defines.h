@@ -37,13 +37,13 @@ Adjust these macros as needed to change the workload.
 #define WEIGHTS_SIZE        (CONV_WEIGHTS_SIZE + FC_WEIGHTS_SIZE)
 
 // Workspace reserved for cuDNN (per stream), in megabytes
-#ifndef CNN_WORKSPACE_MB
 #define CNN_WORKSPACE_MB 256
-#endif
 
 // Allow cuDNN tensor op math (TF32/FP16 on supported GPUs)
-#ifndef CNN_USE_TENSOR_OPS
 #define CNN_USE_TENSOR_OPS 1
-#endif
+
+// CPU-side preprocessing filter size for median filter (odd integer >=1)
+#define CPU_FILTER_SIZE 9
+
 
 #endif // CNN_DEFINES_H

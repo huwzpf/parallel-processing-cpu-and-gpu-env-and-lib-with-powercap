@@ -1,8 +1,12 @@
 /*
 CPU kernel for CNN staging phase.
-Applies a simple 3x3 box blur to each input image (per sample),
-writing the result to the staging output buffer. This simulates
-an image preprocessing step before GPU inference.
+Applies a configurable KxK median filter to each input
+image (per sample), writing the result to the staging output
+buffer. This simulates an image preprocessing step before GPU
+inference.
+
+Configuration:
+  Compile-time define (cnn_defines.h): CPU_FILTER_SIZE (odd integer >= 1)
 
 devPtr points to an array of two pointers (on the slave):
   [0] input  (float*)  size: batchSize * INPUT_BATCH_SIZE
@@ -11,12 +15,25 @@ devPtr points to an array of two pointers (on the slave):
 #include <omp.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 #define ENABLE_LOGGING
 #include "logger.h"
 #include "cnn_defines.h"
 
 static inline int clampi(int v, int lo, int hi) {
   return v < lo ? lo : (v > hi ? hi : v);
+}
+
+static inline void insertion_sort(float *a, int n) {
+  for (int i = 1; i < n; ++i) {
+    float key = a[i];
+    int j = i - 1;
+    while (j >= 0 && a[j] > key) {
+      a[j + 1] = a[j];
+      --j;
+    }
+    a[j + 1] = key;
+  }
 }
 
 static void appkernel(void *devPtr, unsigned long num_elements, int num_threads)
@@ -29,28 +46,34 @@ static void appkernel(void *devPtr, unsigned long num_elements, int num_threads)
   const int W = CNN_IMG_W;
   const int img_stride = C * H * W; // elements per sample
 
+  const int ksize = CPU_FILTER_SIZE;
+  const int radius = CPU_FILTER_SIZE / 2;
+  const int window_elems = CPU_FILTER_SIZE * CPU_FILTER_SIZE;
+
   // Parallelize over samples in the batch
   #pragma omp parallel for num_threads(num_threads)
   for (unsigned long b = 0; b < num_elements; ++b) {
     float *in  = devPtra + b * img_stride;
     float *out = devPtrb + b * img_stride;
 
+    float win[CPU_FILTER_SIZE * CPU_FILTER_SIZE];
+
     for (int c = 0; c < C; ++c) {
       const int c_off = c * H * W;
       for (int y = 0; y < H; ++y) {
         for (int x = 0; x < W; ++x) {
-          float acc = 0.0f;
-          int   cnt = 0;
-          // 3x3 neighborhood with clamped borders
-          for (int dy = -1; dy <= 1; ++dy) {
+          int idx = 0;
+          // Collect KxK neighborhood with clamped borders
+          for (int dy = -radius; dy <= radius; ++dy) {
             const int yy = clampi(y + dy, 0, H - 1);
-            for (int dx = -1; dx <= 1; ++dx) {
+            for (int dx = -radius; dx <= radius; ++dx) {
               const int xx = clampi(x + dx, 0, W - 1);
-              acc += in[c_off + yy * W + xx];
-              ++cnt;
+              win[idx++] = in[c_off + yy * W + xx];
             }
           }
-          out[c_off + y * W + x] = acc / (float)cnt;
+          // Sort and take median
+          insertion_sort(win, window_elems);
+          out[c_off + y * W + x] = win[window_elems / 2];
         }
       }
     }

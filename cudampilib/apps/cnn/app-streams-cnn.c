@@ -12,7 +12,6 @@ Runs multi-layer CNN forward pass on GPU; CPU path is disabled (no-op).
 #include <unistd.h>
 
 #define ENABLE_LOGGING
-#define MPI_LOGGING
 #include "logger.h"
 #include "cnn_defines.h"
 
@@ -35,6 +34,7 @@ long long globalcounter2 = 0;
 long long batchCounter = 0;
 omp_lock_t batchCounterLock;
 int streamcount = 1;
+int gpuFinished = 0;
 
 int consumeBatch() {
   int ret = 0;
@@ -42,7 +42,6 @@ int consumeBatch() {
   if (batchCounter > 0) {
     batchCounter -= 1;
     ret = 1;
-    log_message(LOG_INFO, "Consumed a batch");
   }
   omp_unset_lock(&batchCounterLock);
 
@@ -76,6 +75,7 @@ int main(int argc, char **argv)
   VECTORSIZE = CNN_VECTORSIZE;
   // Repeat data ITERS times to simulate larger memory usage without allocating it all
   #define ITERS 5
+  #define CPU_ITERS 15
 
   int alldevicescount = 0;
   __cudampi__getDeviceCount(&alldevicescount);
@@ -160,8 +160,8 @@ int main(int argc, char **argv)
       }
 
       do {
-        batch_pointer = __cudampi__getnextchunkindex(&globalcounter1, ITERS * VECTORSIZE);
-        if (batch_pointer.start >= ITERS * VECTORSIZE) {
+        batch_pointer = __cudampi__getnextchunkindex(&globalcounter1, CPU_ITERS * VECTORSIZE);
+        if (gpuFinished || batch_pointer.start >= CPU_ITERS * VECTORSIZE) {
           finish = 1;
         } else {
           batch_pointer.start = batch_pointer.start % (VECTORSIZE - batchsize);
@@ -170,8 +170,8 @@ int main(int argc, char **argv)
           __cudampi__memcpyAsync(vectorb + (batch_pointer.start * INPUT_BATCH_SIZE), devPtrb, batch_pointer.n_elements * INPUT_BATCH_SIZE * sizeof(float), cudaMemcpyDeviceToHost, stream);
 
           if (streamcount == 2) {
-            batch_pointer = __cudampi__getnextchunkindex(&globalcounter1, ITERS * VECTORSIZE);
-            if (batch_pointer.start >= ITERS * VECTORSIZE) {
+            batch_pointer = __cudampi__getnextchunkindex(&globalcounter1, CPU_ITERS * VECTORSIZE);
+            if (gpuFinished || batch_pointer.start >= CPU_ITERS * VECTORSIZE) {
               finish = 1;
             } else {
               batch_pointer.start = batch_pointer.start % (VECTORSIZE - batchsize);
@@ -185,7 +185,6 @@ int main(int argc, char **argv)
         privatecounter++;
         if (privatecounter % 2 == 0) {
           __cudampi__deviceSynchronize();
-          log_message(LOG_INFO, "Produced batches");
           produceBatches(2 * streamcount);
         }
       } while (!finish);
@@ -321,7 +320,7 @@ int main(int argc, char **argv)
           __cudampi__deviceSynchronize();
         }
       } while (!finish);
-
+      gpuFinished = 1;
       __cudampi__deviceSynchronize();
       __cudampi__streamDestroy(stream);
       __cudampi__free(devPtr);
