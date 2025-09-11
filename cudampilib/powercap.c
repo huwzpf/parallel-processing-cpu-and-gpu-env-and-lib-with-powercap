@@ -1553,7 +1553,7 @@ void __cudampi__powercappingManagerStep(void) {
 
       // Calculate EDP based on combined power and total time
       // calculate edp per data point, but scale it by batch size to keep values in reasonable range
-      __cudampi__edp = (combinedPower * period_sec) / ((double)combinedDataPoints);
+      __cudampi__edp = (combinedPower * period_sec * period_sec) / ((double)combinedDataPoints);
       log_message(LOG_DEBUG, "EDP Gradient Optimization: All devices have completed their last batch.");
       log_message(LOG_DEBUG, "  Combined Power: %f W", combinedPower);
       log_message(LOG_DEBUG, "  Time since last optimization step: %f s", period_sec);
