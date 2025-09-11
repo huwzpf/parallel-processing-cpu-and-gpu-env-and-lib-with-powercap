@@ -35,6 +35,8 @@ float __cudampi__gradient_opt_start_powercap = 1.0;
 
 // CPU power cap time window (microseconds), broadcast to slaves
 unsigned long long __cudampi__cpu_time_window_us = 1000000ULL; // default 1s
+// Limit number of dynamic optimisation updates (0 = unlimited)
+unsigned long long __cudampi__edp_optimization_steps = 0ULL;
 
 // Gradient optimisation runtime parameters (configurable via powercap.conf)
 float __cudampi__gradient_start_alpha = 2.0f;
@@ -1178,6 +1180,7 @@ void __cudampi__loadAndLogPowercapConfig(void) {
       __cudampi__gradient_alpha_decay = file_config.alpha_decay;
       __cudampi__gradient_opt_eps = file_config.gradient_opt_eps;
       __cudampi__epsilon_decay = file_config.epsilon_decay;
+      __cudampi__edp_optimization_steps = file_config.edp_optimization_steps;
     }
     __cudampi__cpu_time_window_us = file_config.cpu_time_window_us;
     // Apply global powercap from config if provided (> 0)
@@ -1218,18 +1221,22 @@ void __cudampi__loadAndLogPowercapConfig(void) {
     case EDP_GRADIENT_SIMPLE:
       log_message(LOG_INFO, "Powercap strategy: EDP_GRADIENT_SIMPLE");
       log_message(LOG_INFO, "Gradient params: start_alpha=%f, alpha_decay=%f, eps=%f", __cudampi__gradient_start_alpha, __cudampi__gradient_alpha_decay, __cudampi__gradient_opt_eps);
+      log_message(LOG_INFO, "EDP optimisation steps limit: %llu (0=unlimited)", __cudampi__edp_optimization_steps);
       break;
     case EDP_GRADIENT_SPSA:
       log_message(LOG_INFO, "Powercap strategy: EDP_GRADIENT_SPSA");
       log_message(LOG_INFO, "Gradient params: start_alpha=%f, alpha_decay=%f, eps=%f", __cudampi__gradient_start_alpha, __cudampi__gradient_alpha_decay, __cudampi__gradient_opt_eps);
+      log_message(LOG_INFO, "EDP optimisation steps limit: %llu (0=unlimited)", __cudampi__edp_optimization_steps);
       break;
     case EDP_GRADIENT_SIMPLE_ADAPTIVE:
       log_message(LOG_INFO, "Powercap strategy: EDP_GRADIENT_SIMPLE_ADAPTIVE (Adam + FD)");
       log_message(LOG_INFO, "Gradient params: start_alpha=%f, alpha_decay=%f, eps=%f", __cudampi__gradient_start_alpha, __cudampi__gradient_alpha_decay, __cudampi__gradient_opt_eps);
+      log_message(LOG_INFO, "EDP optimisation steps limit: %llu (0=unlimited)", __cudampi__edp_optimization_steps);
       break;
     case EDP_GRADIENT_CMAES:
       log_message(LOG_INFO, "Powercap strategy: EDP_GRADIENT_CMAES (CMA-ES)");
       log_message(LOG_INFO, "CMA-ES params: start_powercap=%f, sigma0~eps=%f", __cudampi__gradient_opt_start_powercap, __cudampi__gradient_opt_eps);
+      log_message(LOG_INFO, "EDP optimisation steps limit: %llu (0=unlimited)", __cudampi__edp_optimization_steps);
       break;
     default:
       log_message(LOG_INFO, "Powercap strategy: UNKNOWN (%d)", __cudampi__powercapStrategy);
@@ -1463,6 +1470,8 @@ void __cudampi__powercappingManagerStep(void) {
       __cudampi__powercapStrategy == EDP_GRADIENT_SPSA ||
       __cudampi__powercapStrategy == EDP_GRADIENT_SIMPLE_ADAPTIVE ||
       __cudampi__powercapStrategy == EDP_GRADIENT_CMAES) {
+    static unsigned long long edp_opt_iterations = 0ULL; // number of completed optimisation updates
+    static int edp_opt_limit_logged = 0;                 // avoid spamming logs when limit reached
     // log_message(LOG_INFO, "EDP Gradient Optimization: Checking if all devices have completed their last batch.");
     int allDevicesCompleted = 1;
     for (int i = 0; i < __cudampi_totaldevicecount; i++) {
@@ -1508,9 +1517,18 @@ void __cudampi__powercappingManagerStep(void) {
       log_message(LOG_DEBUG, "  Calculated EDP: %f J*s", combinedPower * period_sec);
       log_message(LOG_DEBUG, "  Data points collected since last optimization step: %llu", combinedDataPoints);
       log_message(LOG_DEBUG, "  EDP per batch: %f", __cudampi__edp);
-
-      // log_message(LOG_INFO, "All devices have completed their last batch. Proceeding with optimization.");
-      __cudampi__selectpowercap_gradient();
+      // If a limit is configured and already reached, stop further optimisation updates
+      if (__cudampi__edp_optimization_steps > 0ULL && edp_opt_iterations >= __cudampi__edp_optimization_steps) {
+        if (!edp_opt_limit_logged) {
+          log_message(LOG_INFO, "EDP optimisation step limit reached (%llu). Skipping further optimisation.", __cudampi__edp_optimization_steps);
+          edp_opt_limit_logged = 1;
+        }
+        // Do not call optimiser anymore, but keep counters in sync below
+      } else {
+        // Proceed with one optimisation update
+        __cudampi__selectpowercap_gradient();
+        edp_opt_iterations++;
+      }
       for (int i = 0; i < __cudampi_totaldevicecount; i++) {
         omp_set_lock(&(__cudampi__devicelocks[i]));
         __cudampi__mgr_batches_sent[i] = __cudampi__last_batches_sent[i];
