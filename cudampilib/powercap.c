@@ -291,6 +291,10 @@ int __cudampi__SelectPowercapEqualEqualShare() {
   int indexselected;
   float curperfpower;
   int anydeviceenabled = 0;
+  int selectedGPUCount = 0;
+  int selectedCPUCount = 0;
+  const int totalCPUDevices = __cudampi_totaldevicecount - __cudampi_totalgpudevicecount;
+  int deviceTypeToSelect = 1; // 0 -> CPU, 1 -> GPU (alternate)
 
   log_message(LOG_INFO, "---------- Executing equal power capping algorithm ! (with equal CPU and GPU share) ---------- ");
   log_message(LOG_DEBUG, "\nBefore setting power cap");
@@ -351,18 +355,29 @@ int __cudampi__SelectPowercapEqualEqualShare() {
   do {
     curperfpower = 0;
     indexselected = -1;
+    // If all CPUs are already selected, switch to GPU-only
+    if (selectedCPUCount >= totalCPUDevices) {
+      deviceTypeToSelect = 1; // GPU
+    }
+
+    // Consider only preferred type, maximize inverse energy used, and ensure minPowerCap fits
     for (i = 0; i < __cudampi_totaldevicecount; i++) {
-      
+      int isGPU = (i < __cudampi_totalgpudevicecount);
+      int wantGPU = (deviceTypeToSelect == 1);
+      if (__cudampi__devicePowerConfig[i].deviceEnabled != -1) continue;
+      if (__cudampi__devicePowerConfig[i].minPowerCap > powerleft) continue;
+      if (wantGPU && !isGPU) continue;
+      if (!wantGPU && isGPU) continue;
+
       float inverseDeviceEnergyUsed = computeDevPerformance(__cudampi__time_us[i]) / __cudampi__devicePowerConfig[i].currentPowerCap;
-      if (((-1) == (__cudampi__devicePowerConfig[i].deviceEnabled)) && (__cudampi__devicePowerConfig[i].minPowerCap <= powerleft) &&
-          (inverseDeviceEnergyUsed > curperfpower)) {
+      if (inverseDeviceEnergyUsed > curperfpower) {
         curperfpower = inverseDeviceEnergyUsed;
         indexselected = i;
-        anydeviceenabled = 1;
       }
     }
     if (indexselected != (-1)) {
       // enable the found device now
+      anydeviceenabled = 1;
       __cudampi__devicePowerConfig[indexselected].deviceEnabled = 1;
       if (!managerselected) {
         managerselected = 1;
@@ -374,6 +389,14 @@ int __cudampi__SelectPowercapEqualEqualShare() {
       totalFreeCapacity +=  getFreePowerCap(indexselected);
       log_message(LOG_INFO,"Selected device %d", indexselected);
       log_message(LOG_INFO, "Remaining power left: %f", powerleft);
+
+      if (indexselected >= __cudampi_totalgpudevicecount) {
+        selectedCPUCount++;
+        deviceTypeToSelect = 1; // next prefer GPU
+      } else {
+        selectedGPUCount++;
+        deviceTypeToSelect = 0; // next prefer CPU
+      }
     }
   } while (indexselected != (-1));
   fflush(stdout);
@@ -400,6 +423,9 @@ int __cudampi__SelectPowercapEqualEqualShare() {
     log_message(LOG_INFO, "Device %d power cap increased to %f", i, __cudampi__devicePowerConfig[i].currentPowerCap);
     setDevicePowerCap(i);
   }
+
+  log_message(LOG_INFO, "Selected GPUs: %d", selectedGPUCount);
+  log_message(LOG_INFO, "Selected CPUs: %d", selectedCPUCount);
 
   // unlock the devices' locks
   for (i = 0; i < __cudampi_totaldevicecount; i++) {
@@ -993,7 +1019,7 @@ int __cudampi__selectDevicesForPowerlimitGreedyEqualShare() {
   int selectedGPUCount = 0;
   int selectedCPUCount = 0;
   const int totalCPUDevices = __cudampi_totaldevicecount - __cudampi_totalgpudevicecount;
-  int deviceTypeToSelect = 0; // 0 -> CPU, 1 -> GPU
+  int deviceTypeToSelect = 1; // 0 -> CPU, 1 -> GPU
 
   log_message(LOG_INFO, "---------- Executing greedy power capping algorithm (with equal CPU and GPU share) ! ---------- ");
   fflush(stdout);
