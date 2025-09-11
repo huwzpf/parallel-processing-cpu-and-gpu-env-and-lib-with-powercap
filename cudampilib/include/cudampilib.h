@@ -24,6 +24,8 @@ typedef enum {
   CONTINOUS_EQUAL,
   EQUAL_SPLIT,
   BINARY_GREEDY,
+  EQUAL_SHARE_CONTINOUS_EQUAL,
+  EQUAL_SHARE_BINARY_GREEDY,
   EDP_GRADIENT_SIMPLE,
   EDP_GRADIENT_SPSA,
   EDP_GRADIENT_SPSA_ADAPTIVE
@@ -130,5 +132,7 @@ cudaError_t __cudampi__memcpy(void *dst, const void *src, size_t count, enum cud
 void __cudampi__kernelInStream(void *devPtr, cudaStream_t stream, unsigned long long id);
 
 void __cudampi__kernel(void *devPtr, unsigned long long id);
+
+int __cudampi__isDeviceCpu(int i);
 
 #endif

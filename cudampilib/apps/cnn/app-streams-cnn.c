@@ -339,11 +339,10 @@ int main(int argc, char **argv)
         if (devPtrw2) __cudampi__free(devPtrw2);
       }
     }
-    log_message(LOG_INFO, "[T%d] Finished", mythreadid);
   }
 
   gettimeofday(&stop, NULL);
-  log_message(LOG_INFO, "CNN main elapsed time=%f\n", (double)((stop.tv_sec - start.tv_sec) + (double)(stop.tv_usec - start.tv_usec) / 1000000.0));
+  log_message(LOG_INFO, "Main elapsed time=%f\n", (double)((stop.tv_sec - start.tv_sec) + (double)(stop.tv_usec - start.tv_usec) / 1000000.0));
 
   __cudampi__terminateMPI();
 
@@ -356,5 +355,5 @@ int main(int argc, char **argv)
   cudaFreeHost(vectork);
 
   gettimeofday(&stoptotal, NULL);
-  log_message(LOG_INFO, "CNN total elapsed time=%f\n", (double)((stoptotal.tv_sec - starttotal.tv_sec) + (double)(stoptotal.tv_usec - starttotal.tv_usec) / 1000000.0));
+  log_message(LOG_INFO, "Total elapsed time=%f\n", (double)((stoptotal.tv_sec - starttotal.tv_sec) + (double)(stoptotal.tv_usec - starttotal.tv_usec) / 1000000.0));
 }

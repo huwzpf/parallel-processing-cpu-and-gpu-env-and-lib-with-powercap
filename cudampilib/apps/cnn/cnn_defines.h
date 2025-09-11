@@ -43,7 +43,7 @@ Adjust these macros as needed to change the workload.
 #define CNN_USE_TENSOR_OPS 1
 
 // CPU-side preprocessing filter size for median filter (odd integer >=1)
-#define CPU_FILTER_SIZE 9
+#define CPU_FILTER_SIZE 11
 
 
 #endif // CNN_DEFINES_H

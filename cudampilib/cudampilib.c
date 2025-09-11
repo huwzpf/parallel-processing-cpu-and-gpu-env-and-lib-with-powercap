@@ -994,6 +994,12 @@ int __cudampi__isCpu()
   return __cudampi__currentDevice  >= __cudampi_totalgpudevicecount;
 }
 
+
+int __cudampi__isDeviceCpu(int i)
+{
+  return __cudampi__currentdevice[i]  >= __cudampi_totalgpudevicecount;
+}
+
 cudaError_t __cudampi__setDevice(int device) {
   __cudampi__currentDevice = device; // set it for the current thread
   if (!__cudampi__isCpu()) {
