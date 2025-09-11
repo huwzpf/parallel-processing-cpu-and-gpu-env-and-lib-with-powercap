@@ -34,8 +34,6 @@ long long globalcounter2 = 0;
 long long batchCounter = 0;
 omp_lock_t batchCounterLock;
 int streamcount = 1;
-int gpuFinished = 0;
-
 int consumeBatch() {
   int ret = 0;
   omp_set_lock(&batchCounterLock);
@@ -69,13 +67,20 @@ int main(int argc, char **argv)
   gettimeofday(&starttotal, NULL);
 
   __cudampi__initializeMPI(argc, argv);
+  extern powercapStrategy_t __cudampi__powercapStrategy;
+
+  if (__cudampi__powercapStrategy == BINARY_GREEDY) {
+    __cudampi__powercapStrategy = EQUAL_SHARE_BINARY_GREEDY;
+  }
+  if (__cudampi__powercapStrategy == CONTINOUS_EQUAL) {
+    __cudampi__powercapStrategy = EQUAL_SHARE_CONTINOUS_EQUAL;
+  }
 
   streamcount = __cudampi__arguments.number_of_streams;
   batchsize = __cudampi__arguments.batch_size;
   VECTORSIZE = CNN_VECTORSIZE;
   // Repeat data ITERS times to simulate larger memory usage without allocating it all
   #define ITERS 5
-  #define CPU_ITERS 15
 
   int alldevicescount = 0;
   __cudampi__getDeviceCount(&alldevicescount);
@@ -160,8 +165,8 @@ int main(int argc, char **argv)
       }
 
       do {
-        batch_pointer = __cudampi__getnextchunkindex(&globalcounter1, CPU_ITERS * VECTORSIZE);
-        if (gpuFinished || batch_pointer.start >= CPU_ITERS * VECTORSIZE) {
+        batch_pointer = __cudampi__getnextchunkindex(&globalcounter1, ITERS * VECTORSIZE);
+        if (batch_pointer.start >= ITERS * VECTORSIZE) {
           finish = 1;
         } else {
           batch_pointer.start = batch_pointer.start % (VECTORSIZE - batchsize);
@@ -170,8 +175,8 @@ int main(int argc, char **argv)
           __cudampi__memcpyAsync(vectorb + (batch_pointer.start * INPUT_BATCH_SIZE), devPtrb, batch_pointer.n_elements * INPUT_BATCH_SIZE * sizeof(float), cudaMemcpyDeviceToHost, stream);
 
           if (streamcount == 2) {
-            batch_pointer = __cudampi__getnextchunkindex(&globalcounter1, CPU_ITERS * VECTORSIZE);
-            if (gpuFinished || batch_pointer.start >= CPU_ITERS * VECTORSIZE) {
+            batch_pointer = __cudampi__getnextchunkindex(&globalcounter1, ITERS * VECTORSIZE);
+            if (batch_pointer.start >= ITERS * VECTORSIZE) {
               finish = 1;
             } else {
               batch_pointer.start = batch_pointer.start % (VECTORSIZE - batchsize);
@@ -190,6 +195,7 @@ int main(int argc, char **argv)
       } while (!finish);
 
       __cudampi__deviceSynchronize();
+      produceBatches(2 * streamcount);
       __cudampi__streamDestroy(stream);
       __cudampi__free(devPtr);
       __cudampi__free(devPtra);
@@ -267,7 +273,7 @@ int main(int argc, char **argv)
         batch_pointer = __cudampi__getnextchunkindex(&globalcounter2, ITERS * VECTORSIZE);
         if (batch_pointer.start >= ITERS * VECTORSIZE) {
           finish = 1;
-        } else {
+        } else {  
           waitForBatch();
           // Map the virtual index space to the real buffer range
           batch_pointer.start = batch_pointer.start % (VECTORSIZE - batchsize);
@@ -320,7 +326,6 @@ int main(int argc, char **argv)
           __cudampi__deviceSynchronize();
         }
       } while (!finish);
-      gpuFinished = 1;
       __cudampi__deviceSynchronize();
       __cudampi__streamDestroy(stream);
       __cudampi__free(devPtr);

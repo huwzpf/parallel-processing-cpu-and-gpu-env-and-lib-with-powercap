@@ -943,6 +943,11 @@ cudaError_t __cudampi__deviceSynchronize(void) {
 
     if (power != (-1)) {
       __cudampi__devicePowerConfig[__cudampi__currentDevice].currentPower = power;
+
+      if (__cudampi__devicePowerConfig[__cudampi__currentDevice].currentPower > __cudampi__devicePowerConfig[__cudampi__currentDevice].currentPowerCap) {
+        // Make sure there are no noisy readings above the cap
+        __cudampi__devicePowerConfig[__cudampi__currentDevice].currentPower = __cudampi__devicePowerConfig[__cudampi__currentDevice].currentPowerCap;
+      }
       
       log_message(LOG_DEBUG, "Got power %f with time in seconds = %f", power, time_in_seconds);
       #pragma omp atomic
