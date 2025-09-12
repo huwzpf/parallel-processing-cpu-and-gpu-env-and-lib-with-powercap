@@ -496,7 +496,7 @@ void __cudampi__gradientOptStepSpsa() {
         if (p < 0.0) p = 0.0; if (p > 1.0) p = 1.0;
         double vcap = __cudampi__norm_to_cap(p, minv, maxv);
 
-        log_message(LOG_INFO, "PROBE_PLUS: probe [%d] %f -> %f", i, __cudampi__devicePowerConfig[i].currentPowerCap, vcap);
+        log_message(LOG_INFO, "PROBE_PLUS: probe [%d] %f -> %f", i, g->base_x[i], p);
         __cudampi__updatePowerCap((float)vcap, i);
       }
       
@@ -513,7 +513,7 @@ void __cudampi__gradientOptStepSpsa() {
         if (p < 0.0) p = 0.0; if (p > 1.0) p = 1.0;
         double vcap = __cudampi__norm_to_cap(p, minv, maxv);
 
-        log_message(LOG_INFO, "PROBE_MINUS: probe [%d] %f -> %f", i, __cudampi__devicePowerConfig[i].currentPowerCap, vcap);
+        log_message(LOG_INFO, "PROBE_MINUS: probe [%d] %f -> %f", i, g->base_x[i], p);
         __cudampi__updatePowerCap((float)vcap, i);
       }
       
@@ -533,7 +533,7 @@ void __cudampi__gradientOptStepSpsa() {
         double maxv = __cudampi__devicePowerConfig[i].powercapRange.max;
         double vcap = __cudampi__norm_to_cap(p, minv, maxv);
 
-        log_message(LOG_INFO, "DESCENT: probe [%d] %f -> %f with grad=%lf (norm_p=%f)", i, __cudampi__devicePowerConfig[i].currentPowerCap, vcap, grad, p);
+        log_message(LOG_INFO, "DESCENT: probe [%d] %f -> %f with grad=%lf", i, g->base_x[i], p, grad);
         __cudampi__updatePowerCap((float)vcap, i);
       }
       // Mark that a full gradient update has been performed
@@ -703,7 +703,7 @@ void __cudampi__gradientOptStepSimple() {
       double p = g->base_x[i] + (i == g->probe_dim ? g->eps : 0.0);
       if (p < 0.0) p = 0.0; if (p > 1.0) p = 1.0;
       double vcap = __cudampi__norm_to_cap(p, minv, maxv);
-      log_message(LOG_INFO, "Gradient optimisation: probe [%d] %f -> %f", i, __cudampi__devicePowerConfig[i].currentPowerCap, vcap);
+      log_message(LOG_INFO, "Gradient optimisation: probe [%d] %f -> %f", i,  g->base_x[i], p);
       __cudampi__updatePowerCap((float)vcap, i);
     }
     return;  // stay in PROBE phase
@@ -716,7 +716,7 @@ void __cudampi__gradientOptStepSimple() {
     double p = g->base_x[i] - g->alpha * g->grad[i];
     if (p < 0.0) p = 0.0; if (p > 1.0) p = 1.0;
     double vcap = __cudampi__norm_to_cap(p, minv, maxv);
-    log_message(LOG_INFO, "Gradient optimisation: descent [%d] %f -> %f (norm_p=%f)", i, __cudampi__devicePowerConfig[i].currentPowerCap, vcap, p);
+    log_message(LOG_INFO, "Gradient optimisation: descent [%d] %f -> %f", i, g->base_x[i], p);
     __cudampi__updatePowerCap((float)vcap, i);  // helper clamps to limits
   }
 
@@ -1553,7 +1553,7 @@ void __cudampi__powercappingManagerStep(void) {
 
       // Calculate EDP based on combined power and total time
       // calculate edp per data point, but scale it by batch size to keep values in reasonable range
-      __cudampi__edp = (combinedPower * period_sec * period_sec) / ((double)combinedDataPoints);
+      __cudampi__edp = (combinedPower * period_sec * period_sec) / (((double)combinedDataPoints) * ((double)combinedDataPoints));
       log_message(LOG_DEBUG, "EDP Gradient Optimization: All devices have completed their last batch.");
       log_message(LOG_DEBUG, "  Combined Power: %f W", combinedPower);
       log_message(LOG_DEBUG, "  Time since last optimization step: %f s", period_sec);
@@ -1565,6 +1565,36 @@ void __cudampi__powercappingManagerStep(void) {
         if (!edp_opt_limit_logged) {
           log_message(LOG_INFO, "EDP optimisation step limit reached (%llu). Skipping further optimisation.", __cudampi__edp_optimization_steps);
           edp_opt_limit_logged = 1;
+        }
+        // Mark optimisation finished and snapshot global stats once
+        if (!__cudampi__optimizationFinished) {
+          #pragma omp critical
+          {
+            if (!__cudampi__optimizationFinished) {
+              __cudampi__optimizationFinished = 1;
+              // Time since app start
+              struct timeval finish_time;
+              gettimeofday(&finish_time, NULL);
+              if (__cudampi__appStartTimestampSet) {
+                double finish_sec = (double)(finish_time.tv_sec - __cudampi__appStartTime.tv_sec)
+                                  + (double)(finish_time.tv_usec - __cudampi__appStartTime.tv_usec) / 1000000.0;
+                __cudampi__optimizationFinishedTime = finish_sec;
+              } else {
+                __cudampi__optimizationFinishedTime = 0.0;
+              }
+              // Energy snapshot
+              __cudampi__optimizationFinishedEnergy = __cudampi__totalEnergyUsed;
+              // Data points snapshot (sum over devices safely)
+              unsigned long long total_dp = 0ULL;
+              for (int i = 0; i < __cudampi_totaldevicecount; i++) {
+                omp_set_lock(&(__cudampi__devicelocks[i]));
+                total_dp += __cudampi__data_points_sent[i];
+                omp_unset_lock(&(__cudampi__devicelocks[i]));
+              }
+              __cudampi__optimizationFinishedDataPoints = total_dp;
+              log_message(LOG_INFO, "Dynamic optimisation finished: t=%.3fs, E=%.3fJ, DP=%llu", __cudampi__optimizationFinishedTime, __cudampi__optimizationFinishedEnergy, __cudampi__optimizationFinishedDataPoints);
+            }
+          }
         }
         // Do not call optimiser anymore, but keep counters in sync below
       } else {

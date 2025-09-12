@@ -13,4 +13,5 @@ void __cudampi__applyInitialPowercapsForStrategy(void);
 void __cudampi__cmaesCleanup(void);
 void __cudampi__resetLocalPowercaps(void);
 
+extern powercapStrategy_t __cudampi__powercapStrategy;
 #endif // CUDAMPI_POWERCAP_H

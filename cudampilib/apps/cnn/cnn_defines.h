@@ -16,10 +16,10 @@ Adjust these macros as needed to change the workload.
 
 // Convolution
 #define CNN_KERNEL_SIZE 7          // square kernel KxK
-#define CNN_LAYERS 16              // number of stacked conv layers (same weights for inner layers)
+#define CNN_LAYERS 4            // number of stacked conv layers (same weights for inner layers)
 
 // Classifier
-#define CNN_CLASSES 4096
+#define CNN_CLASSES 128
 
 // Total number of elements (samples) to process
 #define CNN_VECTORSIZE 4000
@@ -43,7 +43,7 @@ Adjust these macros as needed to change the workload.
 #define CNN_USE_TENSOR_OPS 1
 
 // CPU-side preprocessing filter size for median filter (odd integer >=1)
-#define CPU_FILTER_SIZE 11
+#define CPU_FILTER_SIZE 7
 
 
 #endif // CNN_DEFINES_H

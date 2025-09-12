@@ -19,7 +19,8 @@ Runs multi-layer CNN forward pass on GPU; CPU path is disabled (no-op).
 #include "utility.h"
 
 // Repeat data ITERS times to simulate larger memory usage without allocating it all
-#define ITERS 20
+#define ITERS 300
+#define SYNC_PERIOD 6
 
 struct __cudampi__arguments_type __cudampi__arguments;
 
@@ -37,11 +38,11 @@ long long globalcounter2 = 0;
 long long batchCounter = 0;
 omp_lock_t batchCounterLock;
 int streamcount = 1;
-int consumeBatch() {
+int consumeDataPoints(long long count) {
   int ret = 0;
   omp_set_lock(&batchCounterLock);
-  if (batchCounter > 0) {
-    batchCounter -= 1;
+  if (batchCounter >= count) {
+    batchCounter -= count;
     ret = 1;
   }
   omp_unset_lock(&batchCounterLock);
@@ -49,13 +50,13 @@ int consumeBatch() {
   return ret;
 }
 
-void waitForBatch() {
-  while(!consumeBatch()) {
+void waitForDataPoints(long long count) {
+  while(!consumeDataPoints(count)) {
     usleep(100);
   }
 }
 
-void produceBatches(long long count) {
+void produceDataPoints(long long count) {
   omp_set_lock(&batchCounterLock);
   batchCounter += count;
   omp_unset_lock(&batchCounterLock);
@@ -131,6 +132,7 @@ int main(int argc, char **argv)
     cudaStream_t stream;
     cudaStream_t stream2;
     long long privatecounter = 0;
+    long long producerCounter = 0;
 
     int mythreadid = omp_get_thread_num();
     __cudampi__setDevice(mythreadid);
@@ -171,6 +173,7 @@ int main(int argc, char **argv)
           finish = 1;
         } else {
           batch_pointer.start = batch_pointer.start % (VECTORSIZE - batchsize);
+          producerCounter += batch_pointer.n_elements;
           __cudampi__memcpyAsync(devPtra, vectora + (batch_pointer.start * INPUT_BATCH_SIZE), batch_pointer.n_elements * INPUT_BATCH_SIZE * sizeof(float), cudaMemcpyHostToDevice, stream);
           __cudampi__kernelInStream(devPtr, stream, 0);
           __cudampi__memcpyAsync(vectorb + (batch_pointer.start * INPUT_BATCH_SIZE), devPtrb, batch_pointer.n_elements * INPUT_BATCH_SIZE * sizeof(float), cudaMemcpyDeviceToHost, stream);
@@ -181,6 +184,7 @@ int main(int argc, char **argv)
               finish = 1;
             } else {
               batch_pointer.start = batch_pointer.start % (VECTORSIZE - batchsize);
+              producerCounter += batch_pointer.n_elements;
               __cudampi__memcpyAsync(devPtra2, vectora + (batch_pointer.start * INPUT_BATCH_SIZE), batch_pointer.n_elements * INPUT_BATCH_SIZE * sizeof(float), cudaMemcpyHostToDevice, stream2);
               __cudampi__kernelInStream(devPtr2, stream2, 0);
               __cudampi__memcpyAsync(vectorb + (batch_pointer.start * INPUT_BATCH_SIZE), devPtrb2, batch_pointer.n_elements * INPUT_BATCH_SIZE * sizeof(float), cudaMemcpyDeviceToHost, stream2);
@@ -189,14 +193,15 @@ int main(int argc, char **argv)
         }
 
         privatecounter++;
-        if (privatecounter % 2 == 0) {
+        if (privatecounter % SYNC_PERIOD == 0) {
           __cudampi__deviceSynchronize();
-          produceBatches(2 * streamcount);
+          produceDataPoints(producerCounter);
+          producerCounter = 0;
         }
       } while (!finish);
 
       __cudampi__deviceSynchronize();
-      produceBatches(2 * streamcount);
+      produceDataPoints(producerCounter);
       __cudampi__streamDestroy(stream);
       __cudampi__free(devPtr);
       __cudampi__free(devPtra);
@@ -275,7 +280,7 @@ int main(int argc, char **argv)
         if (batch_pointer.start >= ITERS * VECTORSIZE) {
           finish = 1;
         } else {  
-          waitForBatch();
+          waitForDataPoints(batch_pointer.n_elements);
           // Map the virtual index space to the real buffer range
           batch_pointer.start = batch_pointer.start % (VECTORSIZE - batchsize);
           // Copy inputs for this chunk
@@ -303,7 +308,7 @@ int main(int argc, char **argv)
             if (batch_pointer.start >= ITERS * VECTORSIZE) {
               finish = 1;
             } else {
-              waitForBatch();
+              waitForDataPoints(batch_pointer.n_elements);
               batch_pointer.start = batch_pointer.start % (VECTORSIZE - batchsize);
               __cudampi__memcpyAsync(
                 devPtra2,
@@ -323,7 +328,7 @@ int main(int argc, char **argv)
         }
 
         privatecounter++;
-        if (privatecounter % 2 == 0) {
+        if (privatecounter % SYNC_PERIOD == 0) {
           __cudampi__deviceSynchronize();
         }
       } while (!finish);

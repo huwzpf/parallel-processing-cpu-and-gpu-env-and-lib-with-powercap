@@ -67,3 +67,9 @@ int __cudampi__cpu_enabled;
 double __cudampi__optimizerSyncPeriod = 0.0; // seconds
 int __cudampi__appStartTimestampSet = 0;
 struct timeval __cudampi__appStartTime;
+
+// Optimisation completion snapshot (set when edp_optimization_steps reached)
+int __cudampi__optimizationFinished = 0;
+double __cudampi__optimizationFinishedTime = 0.0;
+double __cudampi__optimizationFinishedEnergy = 0.0;
+unsigned long long __cudampi__optimizationFinishedDataPoints = 0ULL;

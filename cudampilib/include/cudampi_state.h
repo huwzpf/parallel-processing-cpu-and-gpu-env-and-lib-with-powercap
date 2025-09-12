@@ -78,4 +78,10 @@ extern double __cudampi__optimizerSyncPeriod; // seconds between optimizer syncs
 extern int __cudampi__appStartTimestampSet;   // 1 once set globally
 extern struct timeval __cudampi__appStartTime; // time of first batch record
 
+// Optimisation completion snapshot (set when edp_optimization_steps reached)
+extern int __cudampi__optimizationFinished;                 // 1 once optimisation step limit reached
+extern double __cudampi__optimizationFinishedTime;          // seconds since app start at finish
+extern double __cudampi__optimizationFinishedEnergy;        // total energy used at finish (J)
+extern unsigned long long __cudampi__optimizationFinishedDataPoints; // total data points processed at finish
+
 #endif // CUDAMPI_STATE_H

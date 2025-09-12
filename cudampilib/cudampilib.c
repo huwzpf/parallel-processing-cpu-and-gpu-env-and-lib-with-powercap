@@ -699,6 +699,46 @@ void __cudampi__terminateMPI() {
 
   log_message(LOG_ERROR, "Terminating CUDAMPILIB, Total energy used %lf J", __cudampi__totalEnergyUsed);
 
+  // If dynamic optimisation was enabled, print exploration/exploitation phase stats
+  if (__cudampi__powercapStrategy == EDP_GRADIENT_SIMPLE ||
+      __cudampi__powercapStrategy == EDP_GRADIENT_SPSA ||
+      __cudampi__powercapStrategy == EDP_GRADIENT_SIMPLE_ADAPTIVE ||
+      __cudampi__powercapStrategy == EDP_GRADIENT_CMAES) {
+    // Total datapoints (sum over devices)
+    unsigned long long totalDataPoints = 0ULL;
+    for (int i = 0; i < __cudampi_totaldevicecount; i++) {
+      totalDataPoints += __cudampi__data_points_sent[i];
+    }
+    // Total time since first measurement
+    struct timeval now;
+    gettimeofday(&now, NULL);
+    double totalTimeSec = 0.0;
+    if (__cudampi__appStartTimestampSet) {
+      totalTimeSec = (double)(now.tv_sec - __cudampi__appStartTime.tv_sec)
+                   + (double)(now.tv_usec - __cudampi__appStartTime.tv_usec) / 1000000.0;
+    }
+    double totalEnergyJ = __cudampi__totalEnergyUsed;
+
+    // Exploration phase = from start until optimisation finished (if finished)
+    double explTime = __cudampi__optimizationFinished ? __cudampi__optimizationFinishedTime : totalTimeSec;
+    double explEnergy = __cudampi__optimizationFinished ? __cudampi__optimizationFinishedEnergy : totalEnergyJ;
+    unsigned long long explDP = __cudampi__optimizationFinished ? __cudampi__optimizationFinishedDataPoints : totalDataPoints;
+    double explEDP = explEnergy * explTime;
+    double explEDPperDP2 = (explDP > 0ULL) ? (explEDP / ((double)explDP * (double)explDP)) : 0.0;
+
+    // Exploitation phase = remainder after exploration
+    double exploTime = totalTimeSec - explTime; if (exploTime < 0.0) exploTime = 0.0;
+    double exploEnergy = totalEnergyJ - explEnergy; if (exploEnergy < 0.0) exploEnergy = 0.0;
+    unsigned long long exploDP = (totalDataPoints > explDP) ? (totalDataPoints - explDP) : 0ULL;
+    double exploEDP = exploEnergy * exploTime;
+    double exploEDPperDP2 = (exploDP > 0ULL) ? (exploEDP / ((double)exploDP * (double)exploDP)) : 0.0;
+
+    log_message(LOG_INFO, "[Dynamic Opt] Exploration: time=%.3fs, energy=%.3fJ, EDP=%.3f J*s, EDP/DP^2=%.12f J*s/pt^2",
+                explTime, explEnergy, explEDP, explEDPperDP2);
+    log_message(LOG_INFO, "[Dynamic Opt] Exploitation: time=%.3fs, energy=%.3fJ, EDP=%.3f J*s, EDP/DP^2=%.12f J*s/pt^2",
+                exploTime, exploEnergy, exploEDP, exploEDPperDP2);
+  }
+
   // Cleanup CMA-ES resources if used
   __cudampi__cmaesCleanup();
 
