@@ -45,22 +45,17 @@ typedef struct
 } devicePowerConfig_t;
 
 typedef enum {
+    BASE,          /* used by simple/adaptive FD; unused in SPSA */
     PROBE_PLUS,
     PROBE_MINUS,
     DESCENT
-} spsaState_t;
-
-typedef enum {
-    BASE,
-    PROBE
-} simpleGradState_t;
-
+} gradientOptState;
 
 typedef struct {
     double  eps;                       
     double  eps0;                      /* initial perturbation step */
     double  alpha;
-    spsaState_t     mode;
+    gradientOptState     mode;
     double  base_x   [__CUDAMPI_MAX_THREAD_COUNT];
     double  delta   [__CUDAMPI_MAX_THREAD_COUNT];
     double  J_plus;
@@ -72,10 +67,11 @@ typedef struct {
     double  eps;                            /* finite-difference step  */
     double  eps0;                           /* initial finite-diff step*/
     double  alpha;                          /* learning rate           */
-    simpleGradState_t     mode;
+    gradientOptState     mode;
     int     probe_dim;                      /* which coordinate probe  */ 
     double  base_x   [__CUDAMPI_MAX_THREAD_COUNT];
     double  base_y;
+    double  J_plus;                         /* stores J at +eps probe */
     double  grad     [__CUDAMPI_MAX_THREAD_COUNT];
     int     iter;                           /* iteration counter */
 } simpleGradientOpt_t;
@@ -89,7 +85,7 @@ typedef struct {
     double  beta2;                          /* Adam v decay            */
     double  adam_eps;                       /* Adam numerical epsilon  */
     int     t;                              /* Adam timestep           */
-    simpleGradState_t     mode;
+    gradientOptState     mode;
     int     probe_dim;                      /* which coordinate probe  */
     /* state */
     double  base_x   [__CUDAMPI_MAX_THREAD_COUNT];
@@ -108,7 +104,7 @@ typedef struct {
     double  beta2;                          /* Adam v decay            */
     double  adam_eps;                       /* Adam numerical epsilon  */
     int     t;                              /* Adam timestep           */
-    spsaState_t mode;                       /* reuse SPSA phases       */
+    gradientOptState mode;                       /* reuse SPSA phases       */
     /* state */
     double  base_x   [__CUDAMPI_MAX_THREAD_COUNT];
     double  delta    [__CUDAMPI_MAX_THREAD_COUNT];

@@ -38,6 +38,8 @@ extern struct timeval __cudampi__timestart[__CUDAMPI_MAX_THREAD_COUNT];
 extern struct timeval __cudampi__timestop[__CUDAMPI_MAX_THREAD_COUNT];
 extern double __cudampi__time_us[__CUDAMPI_MAX_THREAD_COUNT];
 extern int __cudampi__timemeasured[__CUDAMPI_MAX_THREAD_COUNT];
+// Latest measured time per data point (seconds) per device
+extern double __cudampi__timePerDataPoint[__CUDAMPI_MAX_THREAD_COUNT];
 extern devicePowerConfig_t __cudampi__devicePowerConfig[__CUDAMPI_MAX_THREAD_COUNT];
 extern omp_lock_t __cudampi__devicelocks[__CUDAMPI_MAX_THREAD_COUNT];
 extern omp_lock_t deviceselectionlock;

@@ -968,6 +968,12 @@ cudaError_t __cudampi__deviceSynchronize(void) {
 
     log_message(LOG_DEBUG, "Scaling factor for power capping = %lf", scaling_factor);
 
+    // Save per-device time per data point based on actual work done this period
+    // Use unscaled time_in_seconds divided by data_points_sent; guard against zero.
+    if (data_points_sent > 0ULL) {
+      __cudampi__timePerDataPoint[__cudampi__currentDevice] = time_in_seconds / (double)data_points_sent;
+    }
+
     // Divide time by scaling factor (which is smaller than 1) which means that
     // if batch size for that device was scaled down, time it would take to process full batch of data is calculated
     __cudampi__time_us[__cudampi__currentDevice] /= scaling_factor;

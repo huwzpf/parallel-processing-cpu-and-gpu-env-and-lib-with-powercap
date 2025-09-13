@@ -41,6 +41,7 @@ struct timeval __cudampi__timestart[__CUDAMPI_MAX_THREAD_COUNT];
 struct timeval __cudampi__timestop[__CUDAMPI_MAX_THREAD_COUNT];
 double __cudampi__time_us[__CUDAMPI_MAX_THREAD_COUNT];
 int __cudampi__timemeasured[__CUDAMPI_MAX_THREAD_COUNT] = {0};
+double __cudampi__timePerDataPoint[__CUDAMPI_MAX_THREAD_COUNT] = {0.0};
 
 devicePowerConfig_t __cudampi__devicePowerConfig[__CUDAMPI_MAX_THREAD_COUNT];
 omp_lock_t __cudampi__devicelocks[__CUDAMPI_MAX_THREAD_COUNT];

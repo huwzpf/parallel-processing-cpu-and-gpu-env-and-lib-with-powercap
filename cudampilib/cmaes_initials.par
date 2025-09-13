@@ -7,7 +7,7 @@
 # Termination thresholds (tune as needed)
 stopFitness 1e-9 
 stopMaxFunEvals   1e299
-stopMaxIter       10
+stopMaxIter       25
 stopTolFun        1
 stopTolFunHist    1
 stopTolX          1e-11

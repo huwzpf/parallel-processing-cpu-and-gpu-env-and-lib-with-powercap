@@ -656,7 +656,7 @@ void __cudampi__gradientOptStepSimple() {
   const int n = __cudampi_totaldevicecount;
   simpleGradientOpt_t* g = &__cudampi__simpleGradientOpt;
 
-  // BASE phase: capture reference sample and emit first probe
+  // BASE phase: capture reference sample and continue to PROBE_PLUS
   if (g->mode == BASE) {
     log_message(LOG_INFO, "Gradient optimisation: entering BASE phase");
     g->base_y = __cudampi__edp;
@@ -668,66 +668,79 @@ void __cudampi__gradientOptStepSimple() {
       g->base_x[i] = p;
     }
     g->probe_dim = 0;
+    g->mode = PROBE_PLUS;  // schedule first +eps in PROBE_PLUS below
+  }
 
-    // first probe perturbs coordinate 0 by +eps
+  // PROBE_PLUS: save J_minus for previous dim (if any), schedule +eps for current dim
+  if (g->mode == PROBE_PLUS) {
+    if (g->probe_dim > 0) {
+      int dprev = g->probe_dim - 1;
+      double J_minus_prev = __cudampi__edp;
+      g->grad[dprev] = (log(g->J_plus) - log(J_minus_prev)) / (2.0 * g->eps);
+      log_message(LOG_INFO, "FD-CENTRAL(LOG): grad[%d] = %f (J+ = %.6f, J- = %.6f)", dprev, g->grad[dprev], g->J_plus, J_minus_prev);
+    }
+    // schedule +eps probe for current coordinate
     for (int i = 0; i < n; ++i) {
       double minv = __cudampi__devicePowerConfig[i].powercapRange.min;
       double maxv = __cudampi__devicePowerConfig[i].powercapRange.max;
       double p = g->base_x[i] + (i == g->probe_dim ? g->eps : 0.0);
       if (p < 0.0) p = 0.0; if (p > 1.0) p = 1.0;
       double vcap = __cudampi__norm_to_cap(p, minv, maxv);
-      log_message(LOG_INFO, "Gradient optimisation: probe [%d] %f -> %f", i, __cudampi__devicePowerConfig[i].currentPowerCap, vcap);
-      __cudampi__updatePowerCap((float)vcap, i);  // helper clamps to limits
+      log_message(LOG_INFO, "FD-CENTRAL: PLUS probe [%d] %f -> %f", i, g->base_x[i], p);
+      __cudampi__updatePowerCap((float)vcap, i);
     }
-
-    g->mode = PROBE;  // enter PROBE phase
+    g->mode = PROBE_MINUS; // next call: record J_plus
     return;
   }
 
-  // PROBE phase: process result of a single coordinate probe
-  double J_probe = __cudampi__edp;
-  double J_base  = g->base_y;
-
-  log_message(LOG_INFO, "Gradient optimisation: entering PROBE phase, J_probe = %f, J_base = %f", J_probe, J_base);
-
-  // finite-difference estimate for current coordinate
-  g->grad[g->probe_dim] = (J_probe - J_base) / (g->eps * J_base);
-  log_message(LOG_INFO, "Gradient optimisation: gradient [%d] = %f", g->probe_dim, g->grad[g->probe_dim]);
-  ++g->probe_dim;
-
-  // if more coordinates remain, schedule the next probe
-  if (g->probe_dim < n) {
+  else if (g->mode == PROBE_MINUS) {
+    // just completed +eps probe for current dim: store J_plus
+    g->J_plus = __cudampi__edp;
+    // schedule -eps probe for the same coordinate
     for (int i = 0; i < n; ++i) {
       double minv = __cudampi__devicePowerConfig[i].powercapRange.min;
       double maxv = __cudampi__devicePowerConfig[i].powercapRange.max;
-      double p = g->base_x[i] + (i == g->probe_dim ? g->eps : 0.0);
+      double p = g->base_x[i] - (i == g->probe_dim ? g->eps : 0.0);
       if (p < 0.0) p = 0.0; if (p > 1.0) p = 1.0;
       double vcap = __cudampi__norm_to_cap(p, minv, maxv);
-      log_message(LOG_INFO, "Gradient optimisation: probe [%d] %f -> %f", i,  g->base_x[i], p);
+      log_message(LOG_INFO, "FD-CENTRAL: MINUS probe [%d] %f -> %f", i, g->base_x[i], p);
       __cudampi__updatePowerCap((float)vcap, i);
     }
-    return;  // stay in PROBE phase
+    if (g->probe_dim < n - 1) {
+      g->probe_dim += 1;   // move to next dimension
+      g->mode = PROBE_PLUS;
+    } else {
+      g->mode = DESCENT;   // last dimension: next call will compute grad and descend
+    }
+    return;
   }
+  else if (g->mode == DESCENT) {
+    // capture J_minus for the last dimension and compute its gradient
+    int last = n - 1;
+    double J_minus_last = __cudampi__edp;
+    g->grad[last] = (log(g->J_plus) - log(J_minus_last)) / (2.0 * g->eps);
+    log_message(LOG_INFO, "FD-CENTRAL(LOG): grad[%d] = %f (J+ = %.6f, J- = %.6f)", last, g->grad[last], g->J_plus, J_minus_last);
 
-  // full gradient available: take one descent step
-  for (int i = 0; i < n; ++i) {
-    double minv = __cudampi__devicePowerConfig[i].powercapRange.min;
-    double maxv = __cudampi__devicePowerConfig[i].powercapRange.max;
-    double p = g->base_x[i] - g->alpha * g->grad[i];
-    if (p < 0.0) p = 0.0; if (p > 1.0) p = 1.0;
-    double vcap = __cudampi__norm_to_cap(p, minv, maxv);
-    log_message(LOG_INFO, "Gradient optimisation: descent [%d] %f -> %f", i, g->base_x[i], p);
-    __cudampi__updatePowerCap((float)vcap, i);  // helper clamps to limits
+    // full gradient available: take one descent step
+    for (int i = 0; i < n; ++i) {
+      double minv = __cudampi__devicePowerConfig[i].powercapRange.min;
+      double maxv = __cudampi__devicePowerConfig[i].powercapRange.max;
+      double p = g->base_x[i] - g->alpha * g->grad[i];
+      if (p < 0.0) p = 0.0; if (p > 1.0) p = 1.0;
+      double vcap = __cudampi__norm_to_cap(p, minv, maxv);
+      log_message(LOG_INFO, "FD-CENTRAL: descent [%d] %f -> %f", i, g->base_x[i], p);
+      __cudampi__updatePowerCap((float)vcap, i);  // helper clamps to limits
+    }
+
+    // Mark that a full gradient update has been performed
+    __cudampi__grad_update_performed = 1;
+    g->alpha *= __cudampi__gradient_alpha_decay;
+    // Update epsilon with slow-then-fast decay: eps = eps0 * (decay)^(iter^2)
+    g->iter += 1;
+    g->eps = g->eps0 * pow((double)__cudampi__epsilon_decay, (double)(g->iter));
+    log_message(LOG_INFO, "FD-CENTRAL: iter=%d eps=%.6f", g->iter, g->eps);
+    g->mode = BASE;  // restart cycle with a new base sample next time
   }
-
-  g->mode = BASE;  // restart cycle with a new base sample next time
-  // Mark that a full gradient update has been performed
-  __cudampi__grad_update_performed = 1;
-  g->alpha *= __cudampi__gradient_alpha_decay;
-  // Update epsilon with slow-then-fast decay: eps = eps0 * (decay)^(iter^2)
-  g->iter += 1;
-  g->eps = g->eps0 * pow((double)__cudampi__epsilon_decay, (double)(g->iter));
-  log_message(LOG_INFO, "FD: iter=%d eps=%.6f", g->iter, g->eps);
 }
 
 //
@@ -760,7 +773,7 @@ void __cudampi__gradientOptStepSimpleAdaptive() {
       log_message(LOG_INFO, "Adaptive FD: probe [%d] %f -> %f", i, __cudampi__devicePowerConfig[i].currentPowerCap, vcap);
       __cudampi__updatePowerCap((float)vcap, i);
     }
-    g->mode = PROBE;
+    g->mode = PROBE_PLUS;
     return;
   }
 
@@ -1468,6 +1481,9 @@ void __cudampi__powercappingManagerStep(void) {
   int amimanager;
   double combinedPower = 0.0;
   unsigned long long combinedDataPoints = 0;
+  double sumTimePerDataPoint = 0.0;
+  int timePerDpCount = 0;
+  double sumRecipTimePerDataPoint = 0.0; // sum over devices of 1 / t_dp
 
   omp_set_lock(&(__cudampi__devicelocks[__cudampi__currentDevice]));
   amimanager = __cudampi__amimanager[__cudampi__currentDevice];
@@ -1526,7 +1542,13 @@ void __cudampi__powercappingManagerStep(void) {
         break;
       }
       combinedPower +=__cudampi__devicePowerConfig[i].currentPower;
-      combinedDataPoints += (__cudampi__last_data_points_sent[i] - __cudampi__mgr_data_points_sent[i]);
+      // combinedDataPoints += (__cudampi__last_data_points_sent[i] - __cudampi__mgr_data_points_sent[i]); // replaced by estimate from t_per_dp
+      // Accumulate per-device time per data point if available
+      if (__cudampi__timePerDataPoint[i] > 0.0) {
+        sumTimePerDataPoint += __cudampi__timePerDataPoint[i];
+        timePerDpCount += 1;
+        sumRecipTimePerDataPoint += 1.0 / __cudampi__timePerDataPoint[i];
+      }
       omp_unset_lock(&(__cudampi__devicelocks[i]));
     }
 
@@ -1553,13 +1575,22 @@ void __cudampi__powercappingManagerStep(void) {
 
       // Calculate EDP based on combined power and total time
       // calculate edp per data point, but scale it by batch size to keep values in reasonable range
-      __cudampi__edp = (combinedPower * period_sec * period_sec) / (((double)combinedDataPoints) * ((double)combinedDataPoints));
-      log_message(LOG_DEBUG, "EDP Gradient Optimization: All devices have completed their last batch.");
-      log_message(LOG_DEBUG, "  Combined Power: %f W", combinedPower);
-      log_message(LOG_DEBUG, "  Time since last optimization step: %f s", period_sec);
-      log_message(LOG_DEBUG, "  Calculated EDP: %f J*s", combinedPower * period_sec);
-      log_message(LOG_DEBUG, "  Data points collected since last optimization step: %llu", combinedDataPoints);
-      log_message(LOG_DEBUG, "  EDP per batch: %f", __cudampi__edp);
+      // Estimate number of data points processed during this period using per-device t_per_dp
+      // total_dp ~= period_sec * sum_i (1 / t_per_dp[i])
+      double estimatedDataPointsD = period_sec * sumRecipTimePerDataPoint;
+      if (estimatedDataPointsD < 0.0) estimatedDataPointsD = 0.0;
+      combinedDataPoints = (unsigned long long) llround(estimatedDataPointsD);
+      __cudampi__edp = (combinedPower * period_sec * period_sec) /
+                       (((double)combinedDataPoints) * ((double)combinedDataPoints));
+      // Compute average time per data point across devices (seconds)
+      double avgTimePerDataPoint = (timePerDpCount > 0) ? (sumTimePerDataPoint / (double)timePerDpCount) : 0.0;
+      log_message(LOG_INFO, "EDP Gradient Optimization: All devices have completed their last batch.");
+      log_message(LOG_INFO, "  Combined Power: %f W", combinedPower);
+      log_message(LOG_INFO, "  Time since last optimization step: %f s", period_sec);
+      log_message(LOG_INFO, "  Avg time per data point across devices: %f s", avgTimePerDataPoint);
+      log_message(LOG_INFO, "  Calculated EDP: %f J*s", combinedPower * period_sec);
+      log_message(LOG_INFO, "  Data points collected since last optimization step: %llu", combinedDataPoints);
+      log_message(LOG_INFO, "  EDP per batch: %f", __cudampi__edp);
       // If a limit is configured and already reached, stop further optimisation updates
       if (__cudampi__edp_optimization_steps > 0ULL && edp_opt_iterations >= __cudampi__edp_optimization_steps) {
         if (!edp_opt_limit_logged) {
