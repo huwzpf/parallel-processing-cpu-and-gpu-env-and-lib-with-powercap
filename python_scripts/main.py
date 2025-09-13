@@ -104,13 +104,16 @@ def experiment_powercap_opt(description: str, app_name: str, file_path: str | os
         cpu_enabled=cpu_enabled,
         strategy = "CONTINOUS_EQUAL"
     )
-
+    '''
     if cpu_enabled:
         cpu_pcs = [0.1, 0.3, 0.5, 0.7, 0.9]
         gpu_pcs = [0.1, 0.5, 0.9]
     else:
         cpu_pcs = [0.9]
         gpu_pcs = [0.1, 0.3, 0.5, 0.7, 0.9]
+    '''
+    cpu_pcs = [0.1, 0.3, 0.5, 0.7, 0.9]
+    gpu_pcs = [0.1, 0.3, 0.5, 0.7, 0.9]
     experiment = Experiment(
         description=description,
         experiment_configurations=[
@@ -129,6 +132,75 @@ def experiment_powercap_opt(description: str, app_name: str, file_path: str | os
         ]
     )
     run_experiment(experiment_file_name=file_path, experiment=experiment, number_of_runs=NUMBER_OF_RUNS)
+
+def experiment_powercap_dynamic(description: str, app_name: str, file_path: str | os.PathLike, number_od_nodes: int = 16, batch_size: int = 480000, cpu_power_scaling: int | None = None, initial_cpu_batch_size_scaling=0, cpu_enabled=True):
+    common_run_parameters = functools.partial(
+        RunParameters,
+        app_name=app_name,
+        batch_size=batch_size,
+        number_od_nodes=number_od_nodes,
+        cpu_power_scaling=cpu_power_scaling,
+        number_of_streams=2,
+        initial_cpu_batch_size_scaling=0,
+        cpu_enabled=cpu_enabled,
+    )
+
+    start_pcs = [0.2, 0.5, 0.8]
+
+    configs: list[RunParameters] = []
+
+    # EDP_GRADIENT_SIMPLE
+    for sp in start_pcs:
+        for steps in [0, 8]:
+            for start_alpha in [0.1, 0.25, 0.4]:
+                for grad_eps in [0.1, 0.2]:
+                    for eps_decay in [0.98, 0.9]:
+                        for a_decay in [0.98, 0.9]:
+                            configs.append(common_run_parameters(
+                                strategy="EDP_GRADIENT_SIMPLE",
+                                start_powercap=sp,
+                                edp_optimization_steps=steps,
+                                start_alpha=start_alpha,
+                                gradient_opt_eps=grad_eps,
+                                epsilon_decay=eps_decay,
+                                alpha_decay=a_decay,
+                            ))
+
+    # EDP_GRADIENT_SPSA
+    for sp in start_pcs:
+        for steps in [0, 50, 100]:
+            for start_alpha in [0.1, 0.2]:
+                for grad_eps in [0.1, 0.2]:
+                    for eps_decay in [0.98, 0.95]:
+                        for a_decay in [0.98, 0.95]:
+                            configs.append(common_run_parameters(
+                                strategy="EDP_GRADIENT_SPSA",
+                                start_powercap=sp,
+                                edp_optimization_steps=steps,
+                                start_alpha=start_alpha,
+                                gradient_opt_eps=grad_eps,
+                                epsilon_decay=eps_decay,
+                                alpha_decay=a_decay,
+                            ))
+
+    # EDP_GRADIENT_CMAES
+    for sp in start_pcs:
+        for steps in [0, 16]:
+            for grad_eps in [0.1, 0.2, 0.3]:
+                configs.append(common_run_parameters(
+                    strategy="EDP_GRADIENT_CMAES",
+                    start_powercap=sp,
+                    edp_optimization_steps=steps,
+                    gradient_opt_eps=grad_eps,
+                ))
+
+    experiment = Experiment(
+        description=description,
+        experiment_configurations=configs,
+    )
+
+    # Run each configuration once
+    run_experiment(experiment_file_name=file_path, experiment=experiment, number_of_runs=1)
 
 def experiment_time_batch_size(description: str, app_name: str, file_path: str | os.PathLike, number_of_nodes: int):
     common_run_parameters = functools.partial(
@@ -220,8 +292,10 @@ if __name__ == "__main__":
     # experiment_equal_split(description="equal_powercap", app_name="twinprime", file_path="equal_twinprime_powercap_8_nodes.json", number_od_nodes=8, batch_size=480000, cpu_power_scaling=0, cpu_enabled=True)
     # experiment_equal_split(description="equal_powercap", app_name="rnn", file_path="equal_rnn_powercap_8_nodes.json", number_od_nodes=8, batch_size=100, cpu_power_scaling=0, cpu_enabled=True)
 
-    # experiment_powercap_opt(description="continous_powercap", app_name="rnn", file_path="1continous_rnn_powercap_8_nodes.json", number_od_nodes=8, batch_size=100, cpu_power_scaling=0, cpu_enabled=True)
-    # experiment_time_powercap(description="binary_powercap", app_name="rnn", file_path="1binary_rnn_powercap_8_nodes.json", number_od_nodes=8, batch_size=100, cpu_power_scaling=0, cpu_enabled=True)
+    # experiment_powercap_opt(description="continous_powercap", app_name="cnn", file_path="continous_cnn_powercap_8_nodes.json", number_od_nodes=8, batch_size=20, cpu_power_scaling=0, cpu_enabled=True)
+    # experiment_time_powercap(description="binary_powercap", app_name="cnn", file_path="binary_cnn_powercap_8_nodes.json", number_od_nodes=8, batch_size=20, cpu_power_scaling=0, cpu_enabled=True)
+    # experiment_powercap_opt(description="continous_powercap", app_name="rnn", file_path="continous_rnn_powercap_8_nodes.json", number_od_nodes=8, batch_size=100, cpu_power_scaling=0, cpu_enabled=True)
+    # experiment_time_powercap(description="binary_powercap", app_name="rnn", file_path="binary_rnn_powercap_8_nodes.json", number_od_nodes=8, batch_size=100, cpu_power_scaling=0, cpu_enabled=True)
 
     '''
     exp = ExperimentResult.from_file("../cudampilib/equal_cnn_powercap_8_nodes.json")

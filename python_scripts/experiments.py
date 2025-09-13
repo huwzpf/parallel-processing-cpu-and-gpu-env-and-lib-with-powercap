@@ -26,6 +26,7 @@ def write_powercap_conf(run_parameters: RunParameters, config_path: str = "power
         "BINARY_GREEDY",
         "EDP_GRADIENT_SIMPLE",
         "EDP_GRADIENT_SPSA",
+        "EDP_GRADIENT_CMAES",
     ], f"Unsupported strategy: {run_parameters.strategy}"
 
     # Base config lines
@@ -51,6 +52,20 @@ def write_powercap_conf(run_parameters: RunParameters, config_path: str = "power
     # Optional start powercap fraction (0..1); default 0.5 if not provided
     start_powercap = run_parameters.start_powercap if run_parameters.start_powercap is not None else 0.5
     lines.append(f"start_powercap={start_powercap}")
+
+    # Gradient optimisation parameters with sensible defaults if not provided
+    # Defaults mirror those in C parser (powercap_config.c)
+    start_alpha = run_parameters.start_alpha if run_parameters.start_alpha is not None else 0.1
+    alpha_decay = run_parameters.alpha_decay if run_parameters.alpha_decay is not None else 0.99
+    epsilon_decay = run_parameters.epsilon_decay if run_parameters.epsilon_decay is not None else 0.99
+    gradient_opt_eps = run_parameters.gradient_opt_eps if run_parameters.gradient_opt_eps is not None else 5.0
+    edp_optimization_steps = run_parameters.edp_optimization_steps if run_parameters.edp_optimization_steps is not None else 0
+
+    lines.append(f"start_alpha={start_alpha}")
+    lines.append(f"alpha_decay={alpha_decay}")
+    lines.append(f"epsilon_decay={epsilon_decay}")
+    lines.append(f"gradient_opt_eps={gradient_opt_eps}")
+    lines.append(f"edp_optimization_steps={edp_optimization_steps}")
 
     with open(config_path, "w") as f:
         f.write("\n".join(lines) + "\n")

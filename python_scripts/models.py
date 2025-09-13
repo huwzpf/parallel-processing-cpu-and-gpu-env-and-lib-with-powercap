@@ -44,6 +44,13 @@ class RunParameters:
     cpu_time_window_us: int | None = None
     # Optional starting power cap fraction (0..1) for gradient/EQUAL_SPLIT strategies
     start_powercap: float | None = None
+    # Gradient optimisation parameters (EDP_GRADIENT_* strategies)
+    start_alpha: float | None = None
+    alpha_decay: float | None = None
+    epsilon_decay: float | None = None
+    gradient_opt_eps: float | None = None
+    # Limit number of dynamic optimisation updates (0 = unlimited)
+    edp_optimization_steps: int | None = None
 
 
 @dataclass
