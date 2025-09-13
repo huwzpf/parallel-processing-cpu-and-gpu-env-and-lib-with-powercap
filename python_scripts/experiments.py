@@ -22,6 +22,7 @@ def get_arguments(run_parameters: RunParameters):
 def write_powercap_conf(run_parameters: RunParameters, config_path: str = "powercap.conf"):
     assert run_parameters.strategy in [
         "CONTINOUS_EQUAL",
+        "EQUAL_SPLIT",
         "BINARY_GREEDY",
         "EDP_GRADIENT_SIMPLE",
         "EDP_GRADIENT_SPSA",
@@ -46,6 +47,10 @@ def write_powercap_conf(run_parameters: RunParameters, config_path: str = "power
     # Optional CPU time window (us); default 1s if not provided
     cpu_time_window_us = run_parameters.cpu_time_window_us if run_parameters.cpu_time_window_us is not None else 1_000_000
     lines.append(f"cpu_time_window_us={cpu_time_window_us}")
+
+    # Optional start powercap fraction (0..1); default 0.5 if not provided
+    start_powercap = run_parameters.start_powercap if run_parameters.start_powercap is not None else 0.5
+    lines.append(f"start_powercap={start_powercap}")
 
     with open(config_path, "w") as f:
         f.write("\n".join(lines) + "\n")

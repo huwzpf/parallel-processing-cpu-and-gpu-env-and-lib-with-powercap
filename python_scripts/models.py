@@ -42,6 +42,8 @@ class RunParameters:
     gpu_min_powercap: float | None = None
     # Optional CPU time window for power capping (microseconds)
     cpu_time_window_us: int | None = None
+    # Optional starting power cap fraction (0..1) for gradient/EQUAL_SPLIT strategies
+    start_powercap: float | None = None
 
 
 @dataclass

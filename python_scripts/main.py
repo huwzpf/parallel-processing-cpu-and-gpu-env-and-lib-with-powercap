@@ -3,7 +3,7 @@ import functools
 from itertools import chain
 
 from models import RunParameters, Experiment, ExperimentResult, MultipleRunResult, SingleRunResult
-from charts import time_powercap_scatter, time_batch_size_scatter, time_number_of_nodes_bar, time_number_of_nodes_scatter, min_powercap_heatmap_cpu_gpu, print_avg_edp_energy_per_configuration, min_powercap_heatmap_gpu, min_powercap_heatmap_cpu
+from charts import time_powercap_scatter, time_batch_size_scatter, time_number_of_nodes_bar, time_number_of_nodes_scatter, min_powercap_heatmap_cpu_gpu, print_avg_edp_energy_per_configuration, min_powercap_heatmap_gpu, equal_split_start_powercap_plot
 from experiments import run_experiment
 
 # For RNN: NUMBER_OF_RUNS = 5
@@ -65,6 +65,31 @@ def experiment_time_powercap(description: str, app_name: str, file_path: str | o
     )
     run_experiment(experiment_file_name=file_path, experiment=experiment, number_of_runs=NUMBER_OF_RUNS)
 
+
+def experiment_equal_split(description: str, app_name: str, file_path: str | os.PathLike, number_od_nodes: int = 16, batch_size: int = 480000, cpu_power_scaling: int | None = None, initial_cpu_batch_size_scaling=0, cpu_enabled=True):
+    common_run_parameters = functools.partial(
+        RunParameters,
+        app_name=app_name,
+        batch_size=batch_size,
+        number_od_nodes=number_od_nodes,
+        cpu_power_scaling=cpu_power_scaling,
+        number_of_streams=2,
+        initial_cpu_batch_size_scaling=0,
+        # cpu_enabled=True,
+        cpu_enabled=cpu_enabled,
+        strategy = "EQUAL_SPLIT",
+        powercap=0
+    )
+    experiment = Experiment(
+        description=description,
+        experiment_configurations=[
+            common_run_parameters(
+                start_powercap=start_pc,
+            )
+            for start_pc in [0.1, 0.3, 0.5, 0.7, 0.9]
+        ]
+    )
+    run_experiment(experiment_file_name=file_path, experiment=experiment, number_of_runs=NUMBER_OF_RUNS)
 
 def experiment_powercap_opt(description: str, app_name: str, file_path: str | os.PathLike, number_od_nodes: int = 16, batch_size: int = 480000, cpu_power_scaling: int | None = None, initial_cpu_batch_size_scaling=0, cpu_enabled=True):
     common_run_parameters = functools.partial(
@@ -153,7 +178,7 @@ if __name__ == "__main__":
     # experiment_time_powercap(description="binary_powercap", app_name="montecarlo", file_path="binary_montecarlo_powercap_8_nodes.json", number_od_nodes=8, batch_size=480000, cpu_power_scaling=0, cpu_enabled=False)
     # experiment_powercap_opt(description="continous_powercap", app_name="vecmaxdiv", file_path="continous_vecmaxdiv_powercap_8_nodes.json", number_od_nodes=8, batch_size=960000, cpu_power_scaling=0, cpu_enabled=False)
     # experiment_time_powercap(description="binary_powercap", app_name="vecmaxdiv", file_path="binary_vecmaxdiv_powercap_8_nodes.json", number_od_nodes=8, batch_size=960000, cpu_power_scaling=0, cpu_enabled=False)
-
+    '''
     print("---------- Montecarlo experiments ----------")
     exp = ExperimentResult.from_file("../cudampilib/continous_montecarlo_powercap_8_nodes.json")
     min_powercap_heatmap_gpu(exp, "8_plots_montecarlo")
@@ -166,12 +191,14 @@ if __name__ == "__main__":
     exp = ExperimentResult.from_file("../cudampilib/binary_vecmaxdiv_powercap_8_nodes.json")
     print_avg_edp_energy_per_configuration(exp)
 
+    '''
     
     # experiment_powercap_opt(description="continous_powercap", app_name="collatz", file_path="continous_collatz_powercap_8_nodes.json", number_od_nodes=8, batch_size=480000, cpu_power_scaling=0, cpu_enabled=True)
     # experiment_time_powercap(description="binary_powercap", app_name="collatz", file_path="binary_collatz_powercap_8_nodes.json", number_od_nodes=8, batch_size=480000, cpu_power_scaling=0, cpu_enabled=True)
     # experiment_powercap_opt(description="continous_powercap", app_name="twinprime", file_path="continous_twinprime_powercap_8_nodes.json", number_od_nodes=8, batch_size=480000, cpu_power_scaling=0, cpu_enabled=True)
     # experiment_time_powercap(description="binary_powercap", app_name="twinprime", file_path="binary_twinprime_powercap_8_nodes.json", number_od_nodes=8, batch_size=480000, cpu_power_scaling=0, cpu_enabled=True)
 
+    '''
     print("---------- Collatz experiments ----------")
     exp = ExperimentResult.from_file("../cudampilib/continous_collatz_powercap_8_nodes.json")
     min_powercap_heatmap_cpu(exp, "8_plots_collatz")
@@ -183,6 +210,33 @@ if __name__ == "__main__":
     min_powercap_heatmap_cpu(exp, "8_plots_twinprime")
     exp = ExperimentResult.from_file("../cudampilib/binary_twinprime_powercap_8_nodes.json")
     print_avg_edp_energy_per_configuration(exp)
+
+    '''
+
+    # experiment_equal_split(description="equal_powercap", app_name="cnn", file_path="equal_cnn_powercap_8_nodes.json", number_od_nodes=8, batch_size=100, cpu_power_scaling=0, cpu_enabled=True)
+    # experiment_equal_split(description="equal_powercap", app_name="montecarlo", file_path="equal_montecarlo_powercap_8_nodes.json", number_od_nodes=8, batch_size=480000, cpu_power_scaling=0, cpu_enabled=False)
+    # experiment_equal_split(description="equal_powercap", app_name="vecmaxdiv", file_path="equal_vecmaxdiv_powercap_8_nodes.json", number_od_nodes=8, batch_size=960000, cpu_power_scaling=0, cpu_enabled=False)
+    # experiment_equal_split(description="equal_powercap", app_name="collatz", file_path="equal_collatz_powercap_8_nodes.json", number_od_nodes=8, batch_size=480000, cpu_power_scaling=0, cpu_enabled=True)
+    # experiment_equal_split(description="equal_powercap", app_name="twinprime", file_path="equal_twinprime_powercap_8_nodes.json", number_od_nodes=8, batch_size=480000, cpu_power_scaling=0, cpu_enabled=True)
+    # experiment_equal_split(description="equal_powercap", app_name="rnn", file_path="equal_rnn_powercap_8_nodes.json", number_od_nodes=8, batch_size=100, cpu_power_scaling=0, cpu_enabled=True)
+
+    # experiment_powercap_opt(description="continous_powercap", app_name="rnn", file_path="1continous_rnn_powercap_8_nodes.json", number_od_nodes=8, batch_size=100, cpu_power_scaling=0, cpu_enabled=True)
+    # experiment_time_powercap(description="binary_powercap", app_name="rnn", file_path="1binary_rnn_powercap_8_nodes.json", number_od_nodes=8, batch_size=100, cpu_power_scaling=0, cpu_enabled=True)
+
+    '''
+    exp = ExperimentResult.from_file("../cudampilib/equal_cnn_powercap_8_nodes.json")
+    equal_split_start_powercap_plot(exp, "equal_plots_cnn", gpu_max_power=285, gpu_max_pc=285, cpu_max_pc=125)
+    exp = ExperimentResult.from_file("../cudampilib/equal_montecarlo_powercap_8_nodes.json")
+    equal_split_start_powercap_plot(exp, "equal_plots_montecarlo", gpu_max_power=285, gpu_max_pc=285, cpu_max_pc=0)
+    exp = ExperimentResult.from_file("../cudampilib/equal_vecmaxdiv_powercap_8_nodes.json")
+    equal_split_start_powercap_plot(exp, "equal_plots_vecmaxdiv", gpu_max_power=230, gpu_max_pc=285, cpu_max_pc=0)
+    exp = ExperimentResult.from_file("../cudampilib/equal_collatz_powercap_8_nodes.json")
+    equal_split_start_powercap_plot(exp, "equal_plots_collatz", gpu_max_power=100, gpu_max_pc=285, cpu_max_pc=125)
+    exp = ExperimentResult.from_file("../cudampilib/equal_twinprime_powercap_8_nodes.json")
+    equal_split_start_powercap_plot(exp, "equal_plots_twinprime", gpu_max_power=100, gpu_max_pc=285, cpu_max_pc=125)
+    exp = ExperimentResult.from_file("../cudampilib/equal_rnn_powercap_8_nodes.json")
+    equal_split_start_powercap_plot(exp, "equal_plots_rnn", gpu_max_power=170, gpu_max_pc=285, cpu_max_pc=125)
+    '''
 
 
 

@@ -485,3 +485,91 @@ def time_number_of_nodes_scatter(experiment_result: ExperimentResult):
     plt.legend()
     plt.savefig(f'{experiment_result.experiment_result[0].parameters.app_name}_time_nodes_nodes_{experiment_result.experiment_result[0].parameters.number_od_nodes}.png')
     plt.close()
+
+
+def equal_split_start_powercap_plot(
+    experiment_result: ExperimentResult,
+    out_dir: str = "plots_equal_split",
+    gpu_max_power: float = 300.0,
+    gpu_max_pc: float = 300.0,
+    cpu_max_pc: float = 200.0,
+):
+    """
+    Plot metrics vs start_powercap for EQUAL_SPLIT runs.
+
+    X axis: start_powercap (0..1).
+    Secondary top X axis: overall powercap [W], computed per point as:
+      gpu_power = min(gpu_max_power, start_powercap * gpu_max_pc)
+      cpu_power = start_powercap * cpu_max_pc
+      powercap = number_of_nodes * gpu_power + (number_of_nodes - 1) * cpu_power
+
+    Creates three PNGs in `out_dir` for metrics: energy_used, execution_duration, edp.
+    """
+    Path(out_dir).mkdir(parents=True, exist_ok=True)
+
+    # Gather rows that have start_powercap defined (EQUAL_SPLIT runs)
+    rows = []
+    for r in experiment_result.experiment_result:
+        sp = getattr(r.parameters, "start_powercap", None)
+        if sp is None:
+            continue
+        avg_time = float(r.average("execution_duration"))
+        avg_energy = float(r.average("energy_used"))
+        edp_val = avg_time * avg_energy
+        rows.append({
+            "start_powercap": float(sp),
+            "nodes": int(getattr(r.parameters, "number_od_nodes", 1)),
+            "energy_used": avg_energy,
+            "execution_duration": avg_time,
+            "edp": edp_val,
+        })
+
+    if not rows:
+        return
+
+    # Sort by start_powercap for nice lines/ordering
+    rows.sort(key=lambda d: d["start_powercap"])
+
+    # Compute per-point overall powercap using provided config
+    def compute_total_powercap(sp: float, nodes: int) -> float:
+        gpu_power = min(gpu_max_power, sp * gpu_max_pc)
+        cpu_power = sp * cpu_max_pc
+        return nodes * gpu_power + max(0, nodes - 1) * cpu_power
+
+    xs = [d["start_powercap"] for d in rows]
+    pcs = [compute_total_powercap(d["start_powercap"], d["nodes"]) for d in rows]
+
+    app_name = getattr(experiment_result.experiment_result[0].parameters, "app_name", "app")
+    try:
+        nodes_common = {d["nodes"] for d in rows}
+        nodes_str = f"{next(iter(nodes_common))}nodes" if len(nodes_common) == 1 else "varnodes"
+    except Exception:
+        nodes_str = "nodes"
+
+    # Prepare plotting helper for each metric
+    def plot_metric(metric_key: str, ylabel: str, fname_suffix: str):
+        ys = [d[metric_key] for d in rows]
+        fig, ax = plt.subplots(figsize=(7, 4))
+        ax.plot(xs, ys, marker='o', markersize=MARKER_SIZE)
+        ax.set_xlabel("start_powercap")
+        ax.set_ylabel(ylabel)
+        ax.set_title(f"{metric_key.replace('_', ' ').title()} vs start_powercap ({app_name}, {nodes_str})")
+        ax.grid(True, linestyle='--', alpha=0.3)
+
+        # Secondary (top) x-axis with computed total powercap at the same tick positions
+        ax_top = ax.secondary_xaxis('top')
+        ax.set_xticks(xs)
+        ax.set_xticklabels([f"{x:.2f}" for x in xs])
+        ax_top.set_xticks(xs)
+        ax_top.set_xticklabels([f"{pc:.0f}" for pc in pcs])
+        ax_top.set_xlabel("Total powercap [W]")
+
+        plt.tight_layout()
+        out_path = Path(out_dir) / f"{app_name}_equal_split_{nodes_str}_start_pc_{fname_suffix}.png"
+        plt.savefig(out_path, dpi=200)
+        plt.close(fig)
+
+    # Generate plots for energy, time, and EDP
+    plot_metric("energy_used", "Energy used [J]", "energy_used")
+    plot_metric("execution_duration", "Time [s]", "time")
+    plot_metric("edp", "EDP [J*s]", "edp")
