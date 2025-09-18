@@ -123,7 +123,7 @@ def experiment_powercap_opt(description: str, app_name: str, file_path: str | os
                 gpu_min_powercap=gpu_min,
                 cpu_time_window_us=500_000,
             )
-            for powercap in [500, 900, 1300, 1700, 2100, 2500]
+            for powercap in [2500]
             for cpu_min in cpu_pcs
             for gpu_min in gpu_pcs
             # for powercap in [500, 1000, 1500, 2000, 2500]

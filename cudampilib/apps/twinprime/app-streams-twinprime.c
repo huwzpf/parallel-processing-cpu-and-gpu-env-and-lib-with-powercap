@@ -24,6 +24,9 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OU
 #define ENABLE_OUTPUT_LOGS
 #include "utility.h"
 
+// Replay the logical dataset multiple times without allocating extra host memory.
+#define ITERS 25
+
 struct __cudampi__arguments_type __cudampi__arguments;
 
 long long VECTORSIZE;
@@ -168,28 +171,34 @@ int main(int argc, char **argv)
 
     do 
     {
-      batch_pointer = __cudampi__getnextchunkindex(&globalcounter, VECTORSIZE);
+      batch_pointer = __cudampi__getnextchunkindex(&globalcounter, ITERS * VECTORSIZE);
 
-      if (batch_pointer.start >= VECTORSIZE) 
+      if (batch_pointer.start >= ITERS * VECTORSIZE) 
       {
         finish = 1;
       } 
       else 
       {
+        // "Simulate" larger memory size by counting all the way to ITERS * VECTORSIZE (while only VECTORSIZE will fit into RAM)
+        // (VECTORSIZE - batchsize) is largest value that batch_pointer.start can safely take (as n_elements <= batchsize)
+        batch_pointer.start = batch_pointer.start % (VECTORSIZE - batchsize);
         __cudampi__memcpyAsync(devVector, vector + batch_pointer.start, batch_pointer.n_elements * sizeof(long long), cudaMemcpyHostToDevice, stream);
         __cudampi__kernelInStream(devPtr, stream, 0);
         __cudampi__memcpyAsync(results + batch_pointer.start, devResults, batch_pointer.n_elements * sizeof(long long), cudaMemcpyDeviceToHost, stream);
 
         if(streamcount == 2) 
         {
-          batch_pointer = __cudampi__getnextchunkindex(&globalcounter, VECTORSIZE);
+          batch_pointer = __cudampi__getnextchunkindex(&globalcounter, ITERS * VECTORSIZE);
 
-          if (batch_pointer.start >= VECTORSIZE) 
+          if (batch_pointer.start >= ITERS * VECTORSIZE) 
           {
             finish = 1;
           } 
           else 
           {
+            // "Simulate" larger memory size by counting all the way to ITERS * VECTORSIZE (while only VECTORSIZE will fit into RAM)
+            // (VECTORSIZE - batchsize) is largest value that batch_pointer.start can safely take (as n_elements <= batchsize)
+            batch_pointer.start = batch_pointer.start % (VECTORSIZE - batchsize);
             __cudampi__memcpyAsync(devVector2, vector + batch_pointer.start, batch_pointer.n_elements * sizeof(long long), cudaMemcpyHostToDevice, stream2);
             __cudampi__kernelInStream(devPtr2, stream2, 0);
             __cudampi__memcpyAsync(results + batch_pointer.start, devResults2, batch_pointer.n_elements * sizeof(long long), cudaMemcpyDeviceToHost, stream2);
@@ -198,7 +207,7 @@ int main(int argc, char **argv)
       }
 
       privatecounter++;
-      if (privatecounter % 2) 
+      if (privatecounter % 4 == 0) 
       {
         __cudampi__deviceSynchronize();
 

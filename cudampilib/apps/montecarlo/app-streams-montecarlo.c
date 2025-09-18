@@ -30,7 +30,7 @@ int streamcount = 1;
 
 // As in the RNN app: simulate a larger problem by iterating over the
 // same allocated buffers multiple times to avoid huge host memory usage.
-#define ITERS 1
+#define ITERS 30
 
 int main(int argc, char **argv)
 {
@@ -135,7 +135,7 @@ int main(int argc, char **argv)
       }
 
       privatecounter++;
-      if (privatecounter % 10 == 0) {
+      if (privatecounter % 20 == 0) {
         __cudampi__deviceSynchronize();
         struct timeval now_sync; gettimeofday(&now_sync, NULL);
         if (has_last_sync_time) {

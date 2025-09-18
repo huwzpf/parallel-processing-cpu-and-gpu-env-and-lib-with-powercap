@@ -722,20 +722,20 @@ void __cudampi__terminateMPI() {
     // Exploration phase = from start until optimisation finished (if finished)
     double explTime = __cudampi__optimizationFinished ? __cudampi__optimizationFinishedTime : totalTimeSec;
     double explEnergy = __cudampi__optimizationFinished ? __cudampi__optimizationFinishedEnergy : totalEnergyJ;
-    unsigned long long explDP = __cudampi__optimizationFinished ? __cudampi__optimizationFinishedDataPoints : totalDataPoints;
+    unsigned long long explDP = __cudampi__optimizationFinished ?  __cudampi__optimizationFinishedDataPoints /__cudampi__default_batch_size : totalDataPoints /__cudampi__default_batch_size;
     double explEDP = explEnergy * explTime;
     double explEDPperDP2 = (explDP > 0ULL) ? (explEDP / ((double)explDP * (double)explDP)) : 0.0;
 
     // Exploitation phase = remainder after exploration
     double exploTime = totalTimeSec - explTime; if (exploTime < 0.0) exploTime = 0.0;
     double exploEnergy = totalEnergyJ - explEnergy; if (exploEnergy < 0.0) exploEnergy = 0.0;
-    unsigned long long exploDP = (totalDataPoints > explDP) ? (totalDataPoints - explDP) : 0ULL;
+    unsigned long long exploDP = (totalDataPoints > explDP) ? ((totalDataPoints - explDP) / __cudampi__default_batch_size) : 0ULL;
     double exploEDP = exploEnergy * exploTime;
     double exploEDPperDP2 = (exploDP > 0ULL) ? (exploEDP / ((double)exploDP * (double)exploDP)) : 0.0;
 
-    log_message(LOG_INFO, "[Dynamic Opt] Exploration: time=%.3fs, energy=%.3fJ, EDP=%.3f J*s, EDP/DP^2=%.12f J*s/pt^2",
+    log_message(LOG_INFO, "[Dynamic Opt] Exploration: time=%.3fs, energy=%.3fJ, EDP=%.3f J*s, EDP/B^2=%.12f J*s/pt^2",
                 explTime, explEnergy, explEDP, explEDPperDP2);
-    log_message(LOG_INFO, "[Dynamic Opt] Exploitation: time=%.3fs, energy=%.3fJ, EDP=%.3f J*s, EDP/DP^2=%.12f J*s/pt^2",
+    log_message(LOG_INFO, "[Dynamic Opt] Exploitation: time=%.3fs, energy=%.3fJ, EDP=%.3f J*s, EDP/B^2=%.12f J*s/pt^2",
                 exploTime, exploEnergy, exploEDP, exploEDPperDP2);
   }
 

@@ -8,6 +8,8 @@
 #include <assert.h>
 #include <math.h>
 
+#define EDP_SCALING 480000
+
 #define ENABLE_LOGGING
 #define MPI_LOGGING
 #include "logger.h"
@@ -1482,7 +1484,6 @@ void __cudampi__powercappingManagerStep(void) {
   double combinedPower = 0.0;
   unsigned long long combinedDataPoints = 0;
   double sumTimePerDataPoint = 0.0;
-  int timePerDpCount = 0;
   double sumRecipTimePerDataPoint = 0.0; // sum over devices of 1 / t_dp
 
   omp_set_lock(&(__cudampi__devicelocks[__cudampi__currentDevice]));
@@ -1546,7 +1547,6 @@ void __cudampi__powercappingManagerStep(void) {
       // Accumulate per-device time per data point if available
       if (__cudampi__timePerDataPoint[i] > 0.0) {
         sumTimePerDataPoint += __cudampi__timePerDataPoint[i];
-        timePerDpCount += 1;
         sumRecipTimePerDataPoint += 1.0 / __cudampi__timePerDataPoint[i];
       }
       omp_unset_lock(&(__cudampi__devicelocks[i]));
@@ -1579,15 +1579,13 @@ void __cudampi__powercappingManagerStep(void) {
       // total_dp ~= period_sec * sum_i (1 / t_per_dp[i])
       double estimatedDataPointsD = period_sec * sumRecipTimePerDataPoint;
       if (estimatedDataPointsD < 0.0) estimatedDataPointsD = 0.0;
-      combinedDataPoints = (unsigned long long) llround(estimatedDataPointsD);
+      combinedDataPoints =  ((unsigned long long) llround(estimatedDataPointsD))/__cudampi__default_batch_size;
       __cudampi__edp = (combinedPower * period_sec * period_sec) /
                        (((double)combinedDataPoints) * ((double)combinedDataPoints));
       // Compute average time per data point across devices (seconds)
-      double avgTimePerDataPoint = (timePerDpCount > 0) ? (sumTimePerDataPoint / (double)timePerDpCount) : 0.0;
       log_message(LOG_INFO, "EDP Gradient Optimization: All devices have completed their last batch.");
       log_message(LOG_INFO, "  Combined Power: %f W", combinedPower);
       log_message(LOG_INFO, "  Time since last optimization step: %f s", period_sec);
-      log_message(LOG_INFO, "  Avg time per data point across devices: %f s", avgTimePerDataPoint);
       log_message(LOG_INFO, "  Calculated EDP: %f J*s", combinedPower * period_sec);
       log_message(LOG_INFO, "  Data points collected since last optimization step: %llu", combinedDataPoints);
       log_message(LOG_INFO, "  EDP per batch: %f", __cudampi__edp);

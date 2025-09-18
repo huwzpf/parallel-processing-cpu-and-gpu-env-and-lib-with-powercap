@@ -24,6 +24,8 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OU
 #define ENABLE_OUTPUT_LOGS
 #include "utility.h"
 
+// Replay the logical dataset multiple times without allocating extra host memory.
+#define ITERS 30
 
 struct __cudampi__arguments_type __cudampi__arguments;
 
@@ -190,28 +192,34 @@ int main(int argc, char **argv)
 
     do 
     {
-      batch_pointer = __cudampi__getnextchunkindex(&globalcounter, VECTORSIZE);
+      batch_pointer = __cudampi__getnextchunkindex(&globalcounter, ITERS * VECTORSIZE);
 
-      if (batch_pointer.start >= VECTORSIZE) 
+      if (batch_pointer.start >= ITERS * VECTORSIZE) 
       {
         finish = 1;
       }
       else
       {
+        // "Simulate" larger memory size by counting all the way to ITERS * VECTORSIZE (while only VECTORSIZE will fit into RAM)
+        // (VECTORSIZE - batchsize) is largest value that batch_pointer.start can safely take (as n_elements <= batchsize)
+        batch_pointer.start = batch_pointer.start % (VECTORSIZE - batchsize);
         __cudampi__memcpyAsync(devPtra, vectora + batch_pointer.start, batch_pointer.n_elements * sizeof(float), cudaMemcpyHostToDevice, stream1);
         __cudampi__memcpyAsync(devPtrb, vectorb + batch_pointer.start, batch_pointer.n_elements * sizeof(float), cudaMemcpyHostToDevice, stream1);
         __cudampi__kernelInStream(devPtr, stream1, 0);
         __cudampi__memcpyAsync(vectorc + batch_pointer.start, devPtrc, batch_pointer.n_elements * sizeof(float), cudaMemcpyDeviceToHost, stream1);
         if (streamcount == 2) 
         {
-            batch_pointer = __cudampi__getnextchunkindex(&globalcounter, VECTORSIZE);
+            batch_pointer = __cudampi__getnextchunkindex(&globalcounter, ITERS * VECTORSIZE);
 
-            if (batch_pointer.start >= VECTORSIZE) 
+            if (batch_pointer.start >= ITERS * VECTORSIZE) 
             {
               finish = 1;
             } 
             else 
             {
+              // "Simulate" larger memory size by counting all the way to ITERS * VECTORSIZE (while only VECTORSIZE will fit into RAM)
+              // (VECTORSIZE - batchsize) is largest value that batch_pointer.start can safely take (as n_elements <= batchsize)
+              batch_pointer.start = batch_pointer.start % (VECTORSIZE - batchsize);
               __cudampi__memcpyAsync(devPtra2, vectora + batch_pointer.start, batch_pointer.n_elements * sizeof(float), cudaMemcpyHostToDevice, stream2);
               __cudampi__memcpyAsync(devPtrb2, vectorb + batch_pointer.start, batch_pointer.n_elements * sizeof(float), cudaMemcpyHostToDevice, stream2);
               __cudampi__kernelInStream(devPtr2, stream2, 0);
