@@ -2,6 +2,7 @@ from models import ExperimentResult
 from charts import (
     equal_split_dynamic_annotations_plot,
     dynamic_search_trajectories_plot,
+    dynamic_search_best_configurations_plot,
 )
 
 
@@ -72,6 +73,12 @@ dynamic_search_trajectories_plot(
     out_dir="plots_twinprime_dynamic_search",
 )
 
+dynamic_search_best_configurations_plot(
+    exp_twinprime_equal,
+    exp_twinprime_dynamic_search,
+    out_dir="plots_twinprime_dynamic_search_best",
+)
+
 equal_split_dynamic_annotations_plot(
     exp_montecarlo_equal,
     exp_montecarlo_dynamic,
@@ -85,6 +92,12 @@ dynamic_search_trajectories_plot(
     out_dir="plots_montecarlo_dynamic_search",
 )
 
+dynamic_search_best_configurations_plot(
+    exp_montecarlo_equal,
+    exp_montecarlo_dynamic_search,
+    out_dir="plots_montecarlo_dynamic_search_best",
+)
+
 equal_split_dynamic_annotations_plot(
     exp_cnn_equal,
     exp_cnn_dynamic,
@@ -96,4 +109,10 @@ dynamic_search_trajectories_plot(
     exp_cnn_dynamic_search,
     exp_cnn_dynamic,
     out_dir="plots_cnn_dynamic_search",
+)
+
+dynamic_search_best_configurations_plot(
+    exp_cnn_equal,
+    exp_cnn_dynamic_search,
+    out_dir="plots_cnn_dynamic_search_best",
 )

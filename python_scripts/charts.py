@@ -1594,3 +1594,248 @@ def dynamic_search_trajectories_plot(
         out_path = Path(out_dir) / f"{app_name}_dynamic_search_{nodes_label}_{suffix}.png"
         plt.savefig(out_path, dpi=800)
         plt.close(fig)
+
+
+def dynamic_search_best_configurations_plot(
+    equal_split_results: ExperimentResult,
+    dynamic_search_results: ExperimentResult | None,
+    out_dir: str = "plots_dynamic_search_best",
+) -> None:
+    """Plot best-per-strategy configurations plus the overall best against the baseline."""
+
+    if (
+        dynamic_search_results is None
+        or not dynamic_search_results.experiment_result
+        or equal_split_results is None
+        or not equal_split_results.experiment_result
+    ):
+        return
+
+    Path(out_dir).mkdir(parents=True, exist_ok=True)
+
+    def nice_strategy(name: str) -> str:
+        return name.replace("_", " ").title()
+
+    dynamic_param_fields = [
+        "start_alpha",
+        "alpha_decay",
+        "epsilon_decay",
+        "gradient_opt_eps",
+        "edp_optimization_steps",
+        "cpu_min_powercap",
+        "gpu_min_powercap",
+        "cpu_time_window_us",
+    ]
+
+    def fmt_value(val: float) -> str:
+        if val == 0:
+            return "0"
+        abs_val = abs(val)
+        if abs_val >= 1e5 or abs_val < 1e-2:
+            return f"{val:.2e}"
+        return f"{val:.3f}"
+
+    def build_param_label(strategy_name: str, params: RunParameters) -> str:
+        parts: list[str] = []
+        for field in dynamic_param_fields:
+            value = getattr(params, field, None)
+            if value is None:
+                continue
+            parts.append(f"{field}={fmt_value(value)}")
+        if not parts:
+            return "default"
+        return ", ".join(parts)
+
+    def collect_equal_rows(exp: ExperimentResult) -> list[dict[str, float]]:
+        rows: list[dict[str, float]] = []
+        for result in exp.experiment_result:
+            sp = getattr(result.parameters, "start_powercap", None)
+            if sp is None:
+                continue
+            durations = [run.execution_duration for run in result.runs]
+            energies = [run.energy_used for run in result.runs]
+            if not durations or not energies:
+                continue
+            edp_samples = [d * e for d, e in zip(durations, energies)]
+            if not edp_samples:
+                continue
+
+            def stddev(values: list[float]) -> float:
+                if len(values) <= 1:
+                    return 0.0
+                return float(np.std(values, ddof=1))
+
+            rows.append({
+                "start_powercap": float(sp),
+                "edp": float(np.mean(edp_samples)),
+                "edp_std": stddev(edp_samples),
+            })
+        return rows
+
+    equal_rows = collect_equal_rows(equal_split_results)
+    if not equal_rows:
+        return
+
+    equal_rows.sort(key=lambda row: row["start_powercap"])
+    baseline_edp: dict[float, float] = {}
+    for row in equal_rows:
+        sp_val = round(row["start_powercap"], 6)
+        baseline_edp[sp_val] = row["edp"]
+    baseline_powercaps = sorted(baseline_edp.keys())
+
+    app_name = getattr(equal_split_results.experiment_result[0].parameters, "app_name", "app")
+    try:
+        nodes_set = {
+            int(getattr(result.parameters, "number_od_nodes", 0))
+            for result in equal_split_results.experiment_result
+            if getattr(result.parameters, "start_powercap", None) is not None
+        }
+        nodes_label = (
+            f"{next(iter(nodes_set))}nodes" if len(nodes_set) == 1 and nodes_set else "nodes"
+        )
+    except Exception:
+        nodes_label = "nodes"
+
+    strategy_configs: dict[str, dict[str, dict[float, dict[str, float]]]] = defaultdict(lambda: defaultdict(dict))
+    for result in dynamic_search_results.experiment_result:
+        strategy = getattr(result.parameters, "strategy", "UNKNOWN") or "UNKNOWN"
+        sp = getattr(result.parameters, "start_powercap", None)
+        if sp is None:
+            continue
+
+        durations = [run.execution_duration for run in result.runs]
+        energies = [run.energy_used for run in result.runs]
+        if not durations or not energies:
+            continue
+
+        edp_samples = [d * e for d, e in zip(durations, energies)]
+        if not edp_samples:
+            continue
+
+        param_label = build_param_label(strategy, result.parameters)
+        sp_val = round(float(sp), 6)
+
+        def average(values: list[float]) -> float:
+            return float(np.mean(values))
+
+        strategy_configs[strategy][param_label][sp_val] = {
+            "start_powercap": sp_val,
+            "edp": average(edp_samples),
+            "edp_std": float(np.std(edp_samples, ddof=1)) if len(edp_samples) > 1 else 0.0,
+        }
+
+    if not strategy_configs:
+        return
+
+    label_mapping = {
+        "EDP_GRADIENT_CMAES": "CMA-ES",
+        "EDP_GRADIENT_SPSA": "Gradient SPSA",
+        "EDP_GRADIENT_SIMPLE": "Gradient Simple",
+    }
+
+    best_per_strategy: dict[str, tuple[str, list[tuple[float, float]], float]] = {}
+    best_overall: tuple[str, str, list[tuple[float, float]], float] | None = None
+
+    for strategy, config_map in strategy_configs.items():
+        best_config_label: str | None = None
+        best_config_points: list[tuple[float, float]] | None = None
+        best_avg_improvement = float("-inf")
+        best_avg_edp = float("inf")
+
+        for param_label, entries_by_sp in config_map.items():
+            common_powercaps = sorted(set(entries_by_sp.keys()) & set(baseline_powercaps))
+            if not common_powercaps:
+                continue
+
+            points = [(sp, entries_by_sp[sp]["edp"]) for sp in common_powercaps]
+
+            edps = [entries_by_sp[sp]["edp"] for sp in common_powercaps]
+            improvements = [baseline_edp[sp] - entries_by_sp[sp]["edp"] for sp in common_powercaps]
+
+            avg_improvement = float(np.mean(improvements))
+            avg_edp = float(np.mean(edps))
+
+            if avg_improvement > best_avg_improvement:
+                best_avg_improvement = avg_improvement
+                best_avg_edp = avg_edp
+                best_config_label = param_label
+                best_config_points = points
+
+            if best_overall is None or avg_edp < best_overall[3]:
+                best_overall = (strategy, param_label, points, avg_edp)
+
+        if best_config_label and best_config_points is not None:
+            best_per_strategy[strategy] = (
+                best_config_label,
+                best_config_points,
+                best_avg_edp,
+            )
+
+    if not best_per_strategy:
+        return
+
+    fig, ax = plt.subplots(figsize=(7, 4))
+
+    ax.plot(
+        baseline_powercaps,
+        [baseline_edp[sp] for sp in baseline_powercaps],
+        linestyle='-',
+        color='black',
+        linewidth=2.0,
+        marker='o',
+        markersize=MARKER_SIZE,
+        label="Equal Split",
+    )
+
+    cmap = plt.get_cmap('tab10')
+    for idx, (strategy, (_, points, _)) in enumerate(sorted(best_per_strategy.items())):
+        friendly_name = label_mapping.get(strategy, nice_strategy(strategy))
+        color = cmap(idx % cmap.N)
+        x_vals = [sp for sp, _ in points]
+        y_vals = [edp for _, edp in points]
+
+        ax.plot(
+            x_vals,
+            y_vals,
+            linestyle='--',
+            linewidth=1.5,
+            marker='s',
+            markersize=MARKER_SIZE + 1,
+            color=color,
+            label=f"{friendly_name} best avg ΔEDP",
+        )
+
+    if best_overall is not None:
+        overall_strategy, _, overall_points, _ = best_overall
+        overall_x = [sp for sp, _ in overall_points]
+        overall_y = [edp for _, edp in overall_points]
+        overall_label = label_mapping.get(overall_strategy, nice_strategy(overall_strategy))
+
+        ax.plot(
+            overall_x,
+            overall_y,
+            linestyle='-',
+            linewidth=2.0,
+            marker='D',
+            markersize=MARKER_SIZE + 1,
+            color='tab:red',
+            label=f"Overall best ({overall_label})",
+        )
+
+    ax.set_xticks(baseline_powercaps)
+    ax.set_xticklabels([f"{tick:.2f}" for tick in baseline_powercaps], fontsize=9)
+    ax.tick_params(axis='y', labelsize=9)
+
+    ax.set_xlabel("start_powercap", fontsize=9)
+    ax.set_ylabel("EDP", fontsize=9)
+    ax.set_title(
+        f"{app_name}: Best Dynamic Trajectories vs Equal Split (EDP)",
+        fontsize=10,
+    )
+    ax.grid(True, linestyle='--', alpha=0.3)
+    ax.legend(fontsize=8, loc='best')
+
+    plt.tight_layout()
+    out_path = Path(out_dir) / f"{app_name}_dynamic_search_best_{nodes_label}_edp.png"
+    plt.savefig(out_path, dpi=800)
+    plt.close(fig)
