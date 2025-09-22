@@ -2,8 +2,10 @@ import os
 import subprocess
 import sys
 import time
+import json
 
 from pathlib import Path
+from dataclasses import asdict
 
 from models import RunParameters, SingleRunResult, MultipleRunResult, ExperimentResult, Experiment
 
@@ -21,7 +23,7 @@ def get_arguments(run_parameters: RunParameters):
 
 def write_powercap_conf(run_parameters: RunParameters, config_path: str = "powercap.conf"):
     assert run_parameters.strategy in [
-        "CONTINOUS_EQUAL",
+        "CONTINUOUS_GREEDY",
         "EQUAL_SPLIT",
         "BINARY_GREEDY",
         "EDP_GRADIENT_SIMPLE",
@@ -71,7 +73,9 @@ def write_powercap_conf(run_parameters: RunParameters, config_path: str = "power
         f.write("\n".join(lines) + "\n")
 
 def single_app_run(run_parameters: RunParameters) -> SingleRunResult:
-    os.chdir(Path.home() / Path("parallel-processing-cpu-and-gpu-env-and-lib-with-powercap/cudampilib"))
+    repo_root = Path.home() / Path("parallel-processing-cpu-and-gpu-env-and-lib-with-powercap")
+    cache_file = repo_root / "cache.txt"
+    os.chdir(repo_root / "cudampilib")
     # Ensure powercap.conf reflects current run parameters
     write_powercap_conf(run_parameters)
     arguments = get_arguments(run_parameters=run_parameters)
@@ -95,7 +99,23 @@ def single_app_run(run_parameters: RunParameters) -> SingleRunResult:
     if "No devices found under the power limit" in result.stderr:
         return -1
 
-    return SingleRunResult.from_output(stdout=result.stdout, stderr=result.stderr)
+    single_result = SingleRunResult.from_output(stdout=result.stdout, stderr=result.stderr)
+
+    # Log success to cache
+    try:
+        entry = {
+            "parameters": asdict(run_parameters),
+            "result": {
+                "execution_duration": single_result.execution_duration,
+                "energy_used": single_result.energy_used,
+            }
+        }
+        with open(cache_file, "a") as f:
+            f.write(json.dumps(entry) + "\n")
+    except Exception:
+        pass
+
+    return single_result
 
 
 def multiple_app_runs(run_parameters: RunParameters, numer_of_runs: int) -> MultipleRunResult:

@@ -50,10 +50,10 @@ int load_powercap_config(const char *path, powercap_config_t *config) {
             if (strcmp(key, "strategy") == 0) {
                 if (strcmp(value, "DISABLED") == 0) {
                     config->strategy = DISABLED;
-                } else if (strcmp(value, "CONTINOUS_EQUAL") == 0) {
-                    config->strategy = CONTINOUS_EQUAL;
-                } else if (strcmp(value, "EQUAL_SHARE_CONTINOUS_EQUAL") == 0) {
-                    config->strategy = EQUAL_SHARE_CONTINOUS_EQUAL;
+                } else if (strcmp(value, "CONTINUOUS_GREEDY") == 0) {
+                    config->strategy = CONTINUOUS_GREEDY;
+                } else if (strcmp(value, "EQUAL_SHARE_CONTINUOUS_GREEDY") == 0) {
+                    config->strategy = EQUAL_SHARE_CONTINUOUS_GREEDY;
                 } else if (strcmp(value, "EQUAL_SPLIT") == 0) {
                     config->strategy = EQUAL_SPLIT;
                 } else if (strcmp(value, "BINARY_GREEDY") == 0) {

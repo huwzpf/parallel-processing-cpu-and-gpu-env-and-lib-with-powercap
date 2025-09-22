@@ -1,10 +1,11 @@
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 import pandas as pd
-from models import ExperimentResult, MultipleRunResult
+from models import ExperimentResult, MultipleRunResult, RunParameters
 import numpy as np
 from collections import defaultdict
 from pathlib import Path
+import statistics
 
 
 MARKER_SIZE = 3
@@ -31,6 +32,14 @@ def min_powercap_heatmap_cpu_gpu(experiment_result: ExperimentResult, out_dir = 
       - save as '<out_dir>/powercap_<PC>_cpu_time_window_us_<CTW>_<METRIC>.png'
     """
     Path(out_dir).mkdir(parents=True, exist_ok=True)
+
+    app_name = "Application"
+    if experiment_result.experiment_result:
+        app_name = getattr(
+            experiment_result.experiment_result[0].parameters,
+            "app_name",
+            app_name,
+        )
 
     # Collect (powercap, cpu_time_window_us) pairs
     pc_ctw_pairs = [
@@ -150,13 +159,14 @@ def min_powercap_heatmap_cpu_gpu(experiment_result: ExperimentResult, out_dir = 
             plt.figure(figsize=(6, 4))
             im = plt.imshow(grid, aspect="auto", origin="upper")
             plt.title(
-                f"{metric.replace('_', ' ').title()} @ powercap {powercap}, cpu_time_window_us {cpu_time_window_us}"
+                f"{app_name}: {metric.replace('_', ' ').title()} @ powercap {powercap}"
             )
-            plt.xlabel("CPU Min Powercap")
-            plt.ylabel("GPU Min Powercap")
-            plt.xticks(range(len(cpu_vals)), cpu_vals, rotation=45, ha="right")
-            plt.yticks(range(len(gpu_vals)), gpu_vals)
-            plt.colorbar(im)
+            plt.xlabel("CPU Min Powercap", fontsize=12)
+            plt.ylabel("GPU Min Powercap", fontsize=12)
+            plt.xticks(range(len(cpu_vals)), cpu_vals, rotation=45, ha="right", fontsize=12)
+            plt.yticks(range(len(gpu_vals)), gpu_vals, fontsize=12)
+            cbar = plt.colorbar(im)
+            cbar.ax.tick_params(labelsize=12)
 
             # ---- Annotate all cells with exact values ----
             nrows, ncols = grid.shape
@@ -165,7 +175,7 @@ def min_powercap_heatmap_cpu_gpu(experiment_result: ExperimentResult, out_dir = 
                     val = grid[i, j]
                     label = "-" if np.isnan(val) else f"{val:.2f}"
                     # Keep text above any markers for readability
-                    plt.text(j, i, label, ha="center", va="center", color="black", fontsize=6, zorder=3)
+                    plt.text(j, i, label, ha="center", va="center", color="black", fontsize=12, zorder=3)
 
             # ---- Highlight only the single best (minimum) value ----
             flat = [
@@ -177,7 +187,7 @@ def min_powercap_heatmap_cpu_gpu(experiment_result: ExperimentResult, out_dir = 
             if flat:
                 best_val, bi, bj = min(flat, key=lambda x: x[0])
                 # Red filled dot on the best cell
-                plt.scatter(bj, bi, s=120, color='red', marker='o', zorder=2)
+                plt.scatter(bj, bi, s=700, color='red', marker='o', zorder=2)
 
             # Save
             filename = (
@@ -185,7 +195,7 @@ def min_powercap_heatmap_cpu_gpu(experiment_result: ExperimentResult, out_dir = 
                 / f"powercap_{pc_str}_cpu_time_window_us_{ctw_str}_{metric}.png"
             )
             plt.tight_layout()
-            plt.savefig(filename, dpi=200)
+            plt.savefig(filename, dpi=800)
             plt.close()
 
 
@@ -200,18 +210,14 @@ def min_powercap_heatmap_gpu(experiment_result: ExperimentResult, out_dir: str =
     """
     Path(out_dir).mkdir(parents=True, exist_ok=True)
 
-    # Helper for safe value formatting in filenames
-    def fmt_val(val):
-        try:
-            if val is None:
-                return "none"
-            if isinstance(val, (int, np.integer)) or (isinstance(val, float) and float(val).is_integer()):
-                return f"{int(val)}"
-            return f"{val}".replace(".", "_").replace(" ", "_")
-        except Exception:
-            return str(val).replace(" ", "_")
+    app_name = "Application"
+    if experiment_result.experiment_result:
+        app_name = getattr(
+            experiment_result.experiment_result[0].parameters,
+            "app_name",
+            app_name,
+        )
 
-    # Collect all rows (filter to entries that have both powercap and gpu_min_powercap)
     rows = []
     for r in experiment_result.experiment_result:
         pc = getattr(r.parameters, "powercap", None)
@@ -287,12 +293,13 @@ def min_powercap_heatmap_gpu(experiment_result: ExperimentResult, out_dir: str =
 
         plt.figure(figsize=(7, 4))
         im = plt.imshow(grid, aspect="auto", origin="upper")
-        plt.title(f"{metric.replace('_', ' ').title()} vs Powercap and GPU Min PC")
-        plt.xlabel("Powercap")
-        plt.ylabel("GPU Min Powercap")
-        plt.xticks(range(len(pc_vals)), pc_vals, rotation=45, ha="right")
-        plt.yticks(range(len(gmin_vals)), gmin_vals)
-        plt.colorbar(im)
+        plt.title(f"{app_name}: {metric.replace('_', ' ').title()} vs Powercap and GPU Min PC")
+        plt.xlabel("Powercap", fontsize=12)
+        plt.ylabel("GPU Min Powercap", fontsize=12)
+        plt.xticks(range(len(pc_vals)), pc_vals, rotation=45, ha="right", fontsize=12)
+        plt.yticks(range(len(gmin_vals)), gmin_vals, fontsize=12)
+        cbar = plt.colorbar(im)
+        cbar.ax.tick_params(labelsize=12)
 
         # Annotate cells
         nrows, ncols = grid.shape
@@ -300,7 +307,7 @@ def min_powercap_heatmap_gpu(experiment_result: ExperimentResult, out_dir: str =
             for j in range(ncols):
                 val = grid[i, j]
                 label = "-" if np.isnan(val) else f"{val:.2f}"
-                plt.text(j, i, label, ha="center", va="center", color="black", fontsize=6, zorder=3)
+                plt.text(j, i, label, ha="center", va="center", color="black", fontsize=12, zorder=3)
 
         # Highlight the single best (minimum)
         flat = [
@@ -311,11 +318,466 @@ def min_powercap_heatmap_gpu(experiment_result: ExperimentResult, out_dir: str =
         ]
         if flat:
             _, bi, bj = min(flat, key=lambda x: x[0])
-            plt.scatter(bj, bi, s=120, color='red', marker='o', zorder=2)
+            plt.scatter(bj, bi, s=700, color='red', marker='o', zorder=2)
 
         filename = Path(out_dir) / f"gpu_powercap_gpu_min_powercap_{metric}.png"
         plt.tight_layout()
-        plt.savefig(filename, dpi=200)
+        plt.savefig(filename, dpi=800)
+        plt.close()
+
+
+def min_powercap_heatmap_cpu(experiment_result: ExperimentResult, out_dir: str = "plots"):
+    """
+    Create heatmaps over (powercap, cpu_min_powercap) pairs.
+    For each metric (energy_used, edp, execution_duration):
+      - aggregate duplicates by mean
+      - annotate each cell with its value
+      - highlight the single best (minimum) with a red dot
+      - save as '<out_dir>/cpu_powercap_cpu_min_powercap_<METRIC>.png'
+    """
+    Path(out_dir).mkdir(parents=True, exist_ok=True)
+
+    
+    # Collect all rows (filter to entries that have both powercap and gpu_min_powercap)
+    app_name = "Application"
+    if experiment_result.experiment_result:
+        app_name = getattr(
+            experiment_result.experiment_result[0].parameters,
+            "app_name",
+            app_name,
+        )
+
+    rows = []
+    for r in experiment_result.experiment_result:
+        pc = getattr(r.parameters, "powercap", None)
+        cmin = getattr(r.parameters, "cpu_min_powercap", None)
+        if pc is None or cmin is None:
+            continue
+        avg_time = r.average("execution_duration")
+        avg_energy = r.average("energy_used")
+        rows.append({
+            "powercap": pc,
+            "cpu_min_powercap": cmin,
+            "energy_used": float(avg_energy),
+            "execution_duration": float(avg_time),
+            "edp": float(avg_time) * float(avg_energy),
+        })
+
+    if not rows:
+        return
+
+    bucket = defaultdict(lambda: defaultdict(list))
+    for row in rows:
+        key = (row["powercap"], row["cpu_min_powercap"])
+        for metric in ("energy_used", "edp", "execution_duration"):
+            bucket[key][metric].append(row[metric])
+
+    grid_means = {
+        key: {m: float(np.mean(vals)) if len(vals) else np.nan
+              for m, vals in metric_map.items()}
+        for key, metric_map in bucket.items()
+    }
+
+    pc_vals = sorted({pc for (pc, _) in grid_means.keys()})
+    cmin_vals = sorted({cmin for (_, cmin) in grid_means.keys()})
+    if not pc_vals or not cmin_vals:
+        return
+
+    from math import isnan
+    for pc in pc_vals:
+        cands = []
+        for c in cmin_vals:
+            vals = grid_means.get((pc, c), {})
+            edp_val = vals.get("edp", np.nan)
+            energy_val = vals.get("energy_used", np.nan)
+            if not (isinstance(edp_val, float) and isnan(edp_val)) and not (isinstance(energy_val, float) and isnan(energy_val)):
+                cands.append({"cpu_min_powercap": c, "edp": edp_val, "energy": energy_val})
+        if not cands:
+            continue
+        best_edp = min([c for c in cands if not isnan(c["edp"])], key=lambda c: c["edp"], default=None)
+        best_energy = min([c for c in cands if not isnan(c["energy"])], key=lambda c: c["energy"], default=None)
+        if best_edp is not None:
+            print(f"powercap={pc:<4} | min EDP = {best_edp['edp']:.2f}: (cpu_min_powercap={best_edp['cpu_min_powercap']})")
+        if best_energy is not None:
+            print(f"powercap={pc:<4} | min Energy = {best_energy['energy']:.2f}: (cpu_min_powercap={best_energy['cpu_min_powercap']})")
+
+    def to_grid(metric: str):
+        grid = np.full((len(cmin_vals), len(pc_vals)), np.nan, dtype=float)
+        for i, c in enumerate(cmin_vals):
+            for j, p in enumerate(pc_vals):
+                val = grid_means.get((p, c), {}).get(metric, np.nan)
+                grid[i, j] = val
+        return grid
+
+    metrics = ("energy_used", "edp", "execution_duration")
+
+    for metric in metrics:
+        grid = to_grid(metric)
+
+        plt.figure(figsize=(7, 4))
+        im = plt.imshow(grid, aspect="auto", origin="upper")
+        plt.title(f"{app_name}: {metric.replace('_', ' ').title()} vs Powercap and CPU Min PC")
+        plt.xlabel("Powercap", fontsize=12)
+        plt.ylabel("CPU Min Powercap", fontsize=12)
+        plt.xticks(range(len(pc_vals)), pc_vals, rotation=45, ha="right", fontsize=12)
+        plt.yticks(range(len(cmin_vals)), cmin_vals, fontsize=12)
+        cbar = plt.colorbar(im)
+        cbar.ax.tick_params(labelsize=12)
+
+        nrows, ncols = grid.shape
+        for i in range(nrows):
+            for j in range(ncols):
+                val = grid[i, j]
+                label = "-" if np.isnan(val) else f"{val:.2f}"
+                plt.text(j, i, label, ha="center", va="center", color="black", fontsize=12, zorder=3)
+
+        flat = [
+            (grid[i, j], i, j)
+            for i in range(nrows)
+            for j in range(ncols)
+            if not np.isnan(grid[i, j])
+        ]
+        if flat:
+            _, bi, bj = min(flat, key=lambda x: x[0])
+            plt.scatter(bj, bi, s=700, color='red', marker='o', zorder=2)
+
+        filename = Path(out_dir) / f"cpu_powercap_cpu_min_powercap_{metric}.png"
+        plt.tight_layout()
+        plt.savefig(filename, dpi=800)
+        plt.close()
+
+
+def optimal_configuration_metric_trends(
+    continuous_results: ExperimentResult,
+    binary_results: ExperimentResult | None = None,
+    out_dir: str = "plots",
+):
+    """Plot execution time, energy, and EDP for best-EDP configs per powercap.
+
+    If binary_results is provided, the averaged binary metrics (excluding powercap=0)
+    are shown as an additional line on each plot.
+    """
+    Path(out_dir).mkdir(parents=True, exist_ok=True)
+
+    runs = continuous_results.experiment_result
+    if not runs:
+        return
+
+    app_name = getattr(runs[0].parameters, "app_name", "Application")
+
+    exclude_fields = {
+        "app_name",
+        "cpu_enabled",
+        "number_of_streams",
+        "number_od_nodes",
+        "batch_size",
+        "powercap",
+        "strategy",
+    }
+
+    field_values = defaultdict(set)
+    for multi in runs:
+        params = vars(multi.parameters)
+        for name, value in params.items():
+            if name in exclude_fields:
+                continue
+            field_values[name].add(value)
+
+    varying_fields = sorted(name for name, values in field_values.items() if len(values) > 1)
+
+    def make_config_key(params: RunParameters):
+        if not varying_fields:
+            return ("__default__", "__default__")
+        return tuple((field, getattr(params, field, None)) for field in varying_fields)
+
+    def fmt_param_value(val):
+        if isinstance(val, float):
+            if np.isnan(val):
+                return "nan"
+            return (f"{val:.4f}".rstrip("0").rstrip(".") or "0")
+        return str(val)
+
+    def config_label(config_key):
+        if config_key == ("__default__", "__default__"):
+            return "default"
+        parts = []
+        for field, value in config_key:
+            parts.append(f"{field}={fmt_param_value(value)}")
+        return ", ".join(parts)
+
+    metrics_by_pc_and_cfg = defaultdict(lambda: defaultdict(list))
+    metadata_by_pc_cfg: dict[tuple[float, tuple], RunParameters] = {}
+    for multi in runs:
+        pc = getattr(multi.parameters, "powercap", None)
+        if pc is None:
+            continue
+        cfg_key = make_config_key(multi.parameters)
+        try:
+            avg_time = float(multi.average("execution_duration"))
+            avg_energy = float(multi.average("energy_used"))
+        except (TypeError, ValueError, statistics.StatisticsError):
+            print(
+                f"[optimal_configuration_metric_trends] Unable to derive averages for powercap={pc}; skipping configuration"
+            )
+            continue
+        edp_val = avg_time * avg_energy
+        metrics_by_pc_and_cfg[(pc, cfg_key)]["execution_duration"].append(avg_time)
+        metrics_by_pc_and_cfg[(pc, cfg_key)]["energy_used"].append(avg_energy)
+        metrics_by_pc_and_cfg[(pc, cfg_key)]["edp"].append(edp_val)
+        metadata_by_pc_cfg.setdefault((pc, cfg_key), multi.parameters)
+
+    if not metrics_by_pc_and_cfg:
+        return
+
+    aggregated = {}
+    for key, metric_lists in metrics_by_pc_and_cfg.items():
+        aggregated[key] = {
+            metric: float(np.mean(values)) if values else np.nan
+            for metric, values in metric_lists.items()
+        }
+
+    def friendly_strategy(params: RunParameters | None) -> str:
+        raw = getattr(params, "strategy", None)
+        if not raw:
+            return "Continuous"
+        return str(raw).replace("_", " ").title()
+
+    def describe_config(pc: float, cfg_key) -> str:
+        params = metadata_by_pc_cfg.get((pc, cfg_key))
+        strategy_name = friendly_strategy(params)
+        label = config_label(cfg_key)
+        if label == "default":
+            return f"strategy={strategy_name}"
+        return f"strategy={strategy_name}, params={label}"
+
+    def fmt_metric(value: float | None) -> str:
+        try:
+            if value is None or np.isnan(value):
+                return "nan"
+            return f"{value:.4f}"
+        except TypeError:
+            return "nan"
+
+    per_powercap = defaultdict(list)
+    for (pc, cfg_key), metric_map in aggregated.items():
+        per_powercap[pc].append((cfg_key, metric_map))
+
+    best_per_powercap = {}
+    configs_to_plot = set()
+    tol = 1e-9
+    for pc, candidates in per_powercap.items():
+        valid = [c for c in candidates if not np.isnan(c[1].get("edp", np.nan))]
+        if not valid:
+            continue
+        best_edp = min(c[1]["edp"] for c in valid)
+        best_entries = sorted(
+            [
+                (cfg, metrics) for cfg, metrics in valid
+                if abs(metrics["edp"] - best_edp) <= tol
+            ],
+            key=lambda item: config_label(item[0]),
+        )
+        best_per_powercap[pc] = best_entries
+        for cfg_key, metrics in best_entries:
+            configs_to_plot.add(cfg_key)
+            print(
+                f"[optimal_configuration_metric_trends] powercap={pc} best config {config_label(cfg_key)} -> EDP={metrics['edp']:.4f}"
+            )
+
+    if not configs_to_plot:
+        return
+
+    series_by_config = defaultdict(lambda: defaultdict(list))
+    for (pc, cfg_key), metric_map in aggregated.items():
+        if cfg_key not in configs_to_plot:
+            continue
+        series_by_config[cfg_key]["powercap"].append(pc)
+        for metric, value in metric_map.items():
+            series_by_config[cfg_key][metric].append(value)
+
+    binary_series: dict[str, list[tuple[float, float]]] | None = None
+    binary_means_by_pc: dict[float, dict[str, float]] = {}
+    binary_cfg_by_pc: dict[float, tuple] = {}
+    binary_params_by_pc: dict[float, RunParameters] = {}
+    if binary_results is not None:
+        binary_metrics_by_pc = defaultdict(lambda: defaultdict(list))
+        for multi in binary_results.experiment_result:
+            pc = getattr(multi.parameters, "powercap", None)
+            if pc is None or pc == 0:
+                continue
+            try:
+                avg_time = float(multi.average("execution_duration"))
+                avg_energy = float(multi.average("energy_used"))
+            except (TypeError, ValueError, statistics.StatisticsError):
+                print(
+                    f"[optimal_configuration_metric_trends] Unable to derive binary averages for powercap={pc}; skipping configuration"
+                )
+                continue
+            binary_metrics_by_pc[pc]["execution_duration"].append(avg_time)
+            binary_metrics_by_pc[pc]["energy_used"].append(avg_energy)
+            binary_metrics_by_pc[pc]["edp"].append(avg_time * avg_energy)
+            cfg_key = make_config_key(multi.parameters)
+            binary_cfg_by_pc.setdefault(pc, cfg_key)
+            binary_params_by_pc.setdefault(pc, multi.parameters)
+            metadata_by_pc_cfg.setdefault((pc, cfg_key), multi.parameters)
+
+        if binary_metrics_by_pc:
+            binary_series = {}
+            for pc, metrics in binary_metrics_by_pc.items():
+                means = {}
+                for metric in ("execution_duration", "energy_used", "edp"):
+                    values = metrics.get(metric)
+                    if values:
+                        means[metric] = float(np.mean(values))
+                if means:
+                    binary_means_by_pc[pc] = means
+
+            if binary_means_by_pc:
+                for metric in ("execution_duration", "energy_used", "edp"):
+                    points = []
+                    for pc in sorted(binary_means_by_pc.keys()):
+                        val = binary_means_by_pc[pc].get(metric)
+                        if val is None or np.isnan(val):
+                            continue
+                        points.append((pc, val))
+                    if points:
+                        binary_series[metric] = points
+
+    # ---- overall best including binary ----
+    best_overall_edp: tuple[float, float, dict[str, float]] | None = None
+    best_overall_energy: tuple[float, float, dict[str, float]] | None = None
+    best_edp_desc = ""
+    best_energy_desc = ""
+
+    def update_best(pc: float, metrics_map: dict[str, float], desc: str):
+        nonlocal best_overall_edp, best_overall_energy, best_edp_desc, best_energy_desc
+        edp_val = metrics_map.get("edp")
+        if edp_val is not None and not np.isnan(edp_val):
+            if best_overall_edp is None or edp_val < best_overall_edp[0]:
+                best_overall_edp = (edp_val, pc, metrics_map)
+                best_edp_desc = desc
+        energy_val = metrics_map.get("energy_used")
+        if energy_val is not None and not np.isnan(energy_val):
+            if best_overall_energy is None or energy_val < best_overall_energy[0]:
+                best_overall_energy = (energy_val, pc, metrics_map)
+                best_energy_desc = desc
+
+    for (pc, cfg_key), metric_map in aggregated.items():
+        update_best(pc, metric_map, describe_config(pc, cfg_key))
+
+    for pc, metrics_map in binary_means_by_pc.items():
+        cfg_key = binary_cfg_by_pc.get(pc)
+        if cfg_key is not None:
+            desc = describe_config(pc, cfg_key)
+        else:
+            desc = f"strategy={friendly_strategy(binary_params_by_pc.get(pc))}"
+        desc += " (Binary Greedy)"
+        update_best(pc, metrics_map, desc)
+
+    if best_overall_edp:
+        edp_val, pc_val, metrics_map = best_overall_edp
+        print(
+            f"[{app_name}] Overall min EDP: powercap={pc_val} | {best_edp_desc} | "
+            f"EDP={fmt_metric(edp_val)}, Energy={fmt_metric(metrics_map.get('energy_used'))}, "
+            f"Time={fmt_metric(metrics_map.get('execution_duration'))}"
+        )
+
+    if best_overall_energy:
+        energy_val, pc_val, metrics_map = best_overall_energy
+        print(
+            f"[{app_name}] Overall min Energy: powercap={pc_val} | {best_energy_desc} | "
+            f"Energy={fmt_metric(energy_val)}, Time={fmt_metric(metrics_map.get('execution_duration'))}"
+        )
+
+    metrics_to_plot = (
+        ("execution_duration", "Execution Duration"),
+        ("energy_used", "Energy Used"),
+        ("edp", "Energy-Delay Product"),
+    )
+
+    for metric, ylabel in metrics_to_plot:
+        plt.figure(figsize=(7, 4))
+        has_data = False
+        continuous_lines = []
+        for cfg_key in sorted(series_by_config.keys(), key=config_label):
+            data = series_by_config[cfg_key]
+            pcs = data.get("powercap")
+            values = data.get(metric)
+            if not pcs or not values:
+                continue
+            combined = [pair for pair in sorted(zip(pcs, values), key=lambda pair: pair[0]) if not np.isnan(pair[1])]
+            if not combined:
+                continue
+            pcs_sorted = [c[0] for c in combined]
+            values_sorted = [c[1] for c in combined]
+            legend_label = config_label(cfg_key)
+            if legend_label == "default":
+                legend_label = "Continuous Greedy"
+            else:
+                legend_label = f"Continuous Greedy: {legend_label}"
+
+            line, = plt.plot(
+                pcs_sorted,
+                values_sorted,
+                marker="o",
+                label=legend_label,
+            )
+            continuous_lines.append((line, pcs_sorted, values_sorted))
+            has_data = True
+
+        if binary_series and metric in binary_series:
+            pcs_sorted = [pair[0] for pair in binary_series[metric]]
+            values_sorted = [pair[1] for pair in binary_series[metric]]
+            filtered = [pair for pair in zip(pcs_sorted, values_sorted) if not np.isnan(pair[1])]
+            if filtered:
+                pcs_sorted = [pair[0] for pair in filtered]
+                values_sorted = [pair[1] for pair in filtered]
+                line, = plt.plot(
+                    pcs_sorted,
+                    values_sorted,
+                    marker="s",
+                    linestyle="--",
+                    label="Binary Greedy",
+                    color="black",
+                )
+                continuous_lines.append((line, pcs_sorted, values_sorted))
+                has_data = True
+
+        if not has_data:
+            plt.close()
+            continue
+
+        global_min = None
+        for line, pcs_sorted, values_sorted in continuous_lines:
+            for x, y in zip(pcs_sorted, values_sorted):
+                if np.isnan(y):
+                    continue
+                if global_min is None or y < global_min[2]:
+                    global_min = (line, x, y)
+
+        if global_min is not None:
+            line, min_x, min_y = global_min
+            line_color = line.get_color()
+            plt.scatter(min_x, min_y, color=line_color, marker="s", s=70, zorder=5)
+            plt.annotate(
+                f"{min_y:.3f}",
+                xy=(min_x, min_y),
+                xytext=(6, -12),
+                textcoords="offset points",
+                fontsize=9,
+                bbox=dict(boxstyle="round,pad=0.25", fc="white", ec=line_color, lw=0.9, alpha=0.95),
+            )
+
+        plt.xlabel("Powercap")
+        plt.ylabel(ylabel)
+        plt.title(
+            f"{app_name}: Optimal Configurations vs Powercap ({metric.replace('_', ' ').title()})"
+        )
+        plt.legend(fontsize=9)
+        plt.grid(True, linestyle="--", linewidth=0.5, alpha=0.6)
+        plt.tight_layout()
+        filename = Path(out_dir) / f"optimal_configurations_{metric}.png"
+        plt.savefig(filename, dpi=800)
         plt.close()
 
 
@@ -490,19 +952,11 @@ def time_number_of_nodes_scatter(experiment_result: ExperimentResult):
 def equal_split_start_powercap_plot(
     experiment_result: ExperimentResult,
     out_dir: str = "plots_equal_split",
-    gpu_max_power: float = 300.0,
-    gpu_max_pc: float = 300.0,
-    cpu_max_pc: float = 200.0,
 ):
     """
     Plot metrics vs start_powercap for EQUAL_SPLIT runs.
 
     X axis: start_powercap (0..1).
-    Secondary top X axis: overall powercap [W], computed per point as:
-      gpu_power = min(gpu_max_power, start_powercap * gpu_max_pc)
-      cpu_power = start_powercap * cpu_max_pc
-      powercap = number_of_nodes * gpu_power + (number_of_nodes - 1) * cpu_power
-
     Creates three PNGs in `out_dir` for metrics: energy_used, execution_duration, edp.
     """
     Path(out_dir).mkdir(parents=True, exist_ok=True)
@@ -530,14 +984,7 @@ def equal_split_start_powercap_plot(
     # Sort by start_powercap for nice lines/ordering
     rows.sort(key=lambda d: d["start_powercap"])
 
-    # Compute per-point overall powercap using provided config
-    def compute_total_powercap(sp: float, nodes: int) -> float:
-        gpu_power = min(gpu_max_power, sp * gpu_max_pc)
-        cpu_power = sp * cpu_max_pc
-        return nodes * gpu_power + max(0, nodes - 1) * cpu_power
-
     xs = [d["start_powercap"] for d in rows]
-    pcs = [compute_total_powercap(d["start_powercap"], d["nodes"]) for d in rows]
 
     app_name = getattr(experiment_result.experiment_result[0].parameters, "app_name", "app")
     try:
@@ -545,6 +992,17 @@ def equal_split_start_powercap_plot(
         nodes_str = f"{next(iter(nodes_common))}nodes" if len(nodes_common) == 1 else "varnodes"
     except Exception:
         nodes_str = "nodes"
+
+    print(f"EDP breakdown for {app_name} ({nodes_str}):")
+    for row in rows:
+        print(
+            "  start_powercap={sp:.2f} | time={time:.3f}s | energy={energy:.3f}J | EDP={edp:.3f}".format(
+                sp=row["start_powercap"],
+                time=row["execution_duration"],
+                energy=row["energy_used"],
+                edp=row["edp"],
+            )
+        )
 
     # Prepare plotting helper for each metric
     def plot_metric(metric_key: str, ylabel: str, fname_suffix: str):
@@ -556,20 +1014,316 @@ def equal_split_start_powercap_plot(
         ax.set_title(f"{metric_key.replace('_', ' ').title()} vs start_powercap ({app_name}, {nodes_str})")
         ax.grid(True, linestyle='--', alpha=0.3)
 
-        # Secondary (top) x-axis with computed total powercap at the same tick positions
-        ax_top = ax.secondary_xaxis('top')
         ax.set_xticks(xs)
         ax.set_xticklabels([f"{x:.2f}" for x in xs])
-        ax_top.set_xticks(xs)
-        ax_top.set_xticklabels([f"{pc:.0f}" for pc in pcs])
-        ax_top.set_xlabel("Total powercap [W]")
 
         plt.tight_layout()
         out_path = Path(out_dir) / f"{app_name}_equal_split_{nodes_str}_start_pc_{fname_suffix}.png"
-        plt.savefig(out_path, dpi=200)
+        plt.savefig(out_path, dpi=800)
         plt.close(fig)
 
     # Generate plots for energy, time, and EDP
     plot_metric("energy_used", "Energy used [J]", "energy_used")
     plot_metric("execution_duration", "Time [s]", "time")
     plot_metric("edp", "EDP [J*s]", "edp")
+
+
+def equal_split_dynamic_annotations_plot(
+    equal_split_results: ExperimentResult,
+    dynamic_best_results: ExperimentResult,
+    out_dir: str = "plots_equal_dynamic",
+):
+    """Overlay best dynamic strategies on top of equal-split baseline plots."""
+
+    Path(out_dir).mkdir(parents=True, exist_ok=True)
+
+    def nice_strategy(name: str) -> str:
+        return name.replace("_", " ").title()
+
+    dynamic_param_fields = [
+        "start_alpha",
+        "alpha_decay",
+        "epsilon_decay",
+        "gradient_opt_eps",
+        "edp_optimization_steps",
+        "cpu_min_powercap",
+        "gpu_min_powercap",
+        "cpu_time_window_us",
+    ]
+
+    
+    def fmt_value(val: float) -> str:
+        if val == 0:
+            return "0"
+        abs_val = abs(val)
+        if abs_val >= 1e5 or abs_val < 1e-2:
+            return f"{val:.2e}"
+        return f"{val:.3f}"
+
+    def build_param_label(strategy_name: str, params: RunParameters) -> str:
+        parts: list[str] = []
+        for field in dynamic_param_fields:
+            value = getattr(params, field, None)
+            if value is None:
+                continue
+            parts.append(f"{field}={fmt_value(value)}")
+        if not parts:
+            return "default"
+        return ", ".join(parts)
+
+    def collect_equal_rows(exp: ExperimentResult) -> list[dict[str, float]]:
+        rows: list[dict[str, float]] = []
+        for result in exp.experiment_result:
+            sp = getattr(result.parameters, "start_powercap", None)
+            if sp is None:
+                continue
+            durations = [run.execution_duration for run in result.runs]
+            energies = [run.energy_used for run in result.runs]
+            if not durations or not energies:
+                continue
+            avg_time = float(np.mean(durations))
+            avg_energy = float(np.mean(energies))
+            edp_samples = [d * e for d, e in zip(durations, energies)]
+            avg_edp = float(np.mean(edp_samples))
+
+            def stddev(values: list[float]) -> float:
+                if len(values) <= 1:
+                    return 0.0
+                return float(np.std(values, ddof=1))
+
+            rows.append({
+                "start_powercap": float(sp),
+                "execution_duration": avg_time,
+                "energy_used": avg_energy,
+                "edp": avg_edp,
+                "execution_duration_std": stddev(durations),
+                "energy_used_std": stddev(energies),
+                "edp_std": stddev(edp_samples),
+            })
+        return rows
+
+    equal_rows = collect_equal_rows(equal_split_results)
+    if not equal_rows:
+        return
+
+    equal_rows.sort(key=lambda row: row["start_powercap"])
+    xs = [row["start_powercap"] for row in equal_rows]
+
+    app_name = getattr(equal_split_results.experiment_result[0].parameters, "app_name", "app")
+    try:
+        nodes_set = {
+            int(getattr(result.parameters, "number_od_nodes", 0))
+            for result in equal_split_results.experiment_result
+            if getattr(result.parameters, "start_powercap", None) is not None
+        }
+        nodes_label = (
+            f"{next(iter(nodes_set))}nodes" if len(nodes_set) == 1 and nodes_set else "nodes"
+        )
+    except Exception:
+        nodes_label = "nodes"
+
+    def collect_dynamic_points(exp: ExperimentResult) -> dict[str, dict[float, dict[str, float]]]:
+        best: dict[str, dict[float, dict[str, float]]] = {}
+        for result in exp.experiment_result:
+            strategy = getattr(result.parameters, "strategy", "UNKNOWN") or "UNKNOWN"
+            sp = getattr(result.parameters, "start_powercap", None)
+            if sp is None:
+                continue
+            durations = [run.execution_duration for run in result.runs]
+            energies = [run.energy_used for run in result.runs]
+            if not durations or not energies:
+                continue
+            edp_samples = [d * e for d, e in zip(durations, energies)]
+
+            def stddev(values: list[float]) -> float:
+                if len(values) <= 1:
+                    return 0.0
+                return float(np.std(values, ddof=1))
+
+            avg_time = float(np.mean(durations))
+            avg_energy = float(np.mean(energies))
+            avg_edp = float(np.mean(edp_samples))
+
+            param_label = build_param_label(strategy, result.parameters)
+
+            candidate = {
+                "start_powercap": float(sp),
+                "execution_duration": avg_time,
+                "energy_used": avg_energy,
+                "edp": avg_edp,
+                "execution_duration_std": stddev(durations),
+                "energy_used_std": stddev(energies),
+                "edp_std": stddev(edp_samples),
+                "param_label": param_label,
+            }
+            strategy_map = best.setdefault(strategy, {})
+            current = strategy_map.get(float(sp))
+            if current is None or candidate["edp"] < current["edp"]:
+                strategy_map[float(sp)] = candidate
+        return best
+
+    dynamic_points = collect_dynamic_points(dynamic_best_results)
+
+    equal_edp_by_sp = {row['start_powercap']: row['edp'] for row in equal_rows}
+    min_equal_edp = min(equal_edp_by_sp.values()) if equal_edp_by_sp else None
+
+    if dynamic_points:
+        print(f"Dynamic best summary for {app_name} ({nodes_label}):")
+        for strategy in sorted(dynamic_points.keys()):
+            print(f"Strategy: {strategy}")
+            for sp in sorted(dynamic_points[strategy].keys()):
+                values = dynamic_points[strategy][sp]
+                edp = values['edp']
+                edp_std = values['edp_std']
+                cfg = values.get('param_label', 'default')
+                equal_edp = equal_edp_by_sp.get(sp)
+                diff_equal = edp - equal_edp if equal_edp is not None else None
+                diff_min = edp - min_equal_edp if min_equal_edp is not None else None
+                print(
+                    f"  start_pc={sp:.2f} | EDP={edp:.3f} ± {edp_std:.3f} | config: {cfg}"
+                )
+                if equal_edp is not None:
+                    print(
+                        f"      Delta vs equal @ {sp:.2f} = {diff_equal:+.3f} (equal EDP={equal_edp:.3f})"
+                    )
+                else:
+                    print("      Delta vs equal @ start_pc: N/A (no equal data)")
+                if diff_min is not None:
+                    print(
+                        f"      Delta vs equal min = {diff_min:+.3f} (min equal EDP={min_equal_edp:.3f})"
+                    )
+
+
+    metrics = (
+        ("energy_used", "Energy Used", "energy_used", "Energy used"),
+        ("execution_duration", "Execution Duration", "time", "Time"),
+        ("edp", "Energy-Delay Product", "edp", "EDP"),
+    )
+
+    label_mapping = {
+        "EDP_GRADIENT_CMAES": "CMA-ES",
+        "EDP_GRADIENT_SPSA": "Gradient SPSA",
+        "EDP_GRADIENT_SIMPLE": "Gradient Simple",
+    }
+
+    marker_options = ['o', 's', 'D', '^', 'v', 'P', 'X', '*']
+    strategy_list = sorted(dynamic_points.keys())
+    strategy_markers = {
+        strategy: marker_options[idx % len(marker_options)]
+        for idx, strategy in enumerate(strategy_list)
+    }
+
+    cmap = plt.get_cmap('tab10')
+    strategy_colors = {}
+    for idx, strategy in enumerate(strategy_list):
+        if strategy == "EDP_GRADIENT_CMAES":
+            strategy_colors[strategy] = (0.8, 0.2, 0.2)
+        else:
+            strategy_colors[strategy] = cmap(idx % cmap.N)
+
+    for metric_key, ylabel, suffix, metric_title in metrics:
+        ys = [row[metric_key] for row in equal_rows]
+        fig, ax = plt.subplots(figsize=(7, 4))
+        if metric_key == "energy_used":
+            errs = [row["energy_used_std"] for row in equal_rows]
+        elif metric_key == "execution_duration":
+            errs = [row["execution_duration_std"] for row in equal_rows]
+        else:
+            errs = [row["edp_std"] for row in equal_rows]
+
+        ax.errorbar(
+            xs,
+            ys,
+            yerr=errs,
+            fmt='o-',
+            markersize=MARKER_SIZE,
+            color='tab:blue',
+            ecolor='tab:blue',
+            capsize=4,
+            label="Equal Split",
+        )
+
+        if dynamic_points:
+            seen: set[str] = set()
+            for strategy in strategy_list:
+                strategy_values = dynamic_points[strategy]
+                for sp in sorted(strategy_values.keys()):
+                    values = strategy_values[sp]
+                    y_val = values.get(metric_key)
+                    if y_val is None:
+                        continue
+                    if metric_key == "energy_used":
+                        err = values.get("energy_used_std", 0.0)
+                    elif metric_key == "execution_duration":
+                        err = values.get("execution_duration_std", 0.0)
+                    else:
+                        err = values.get("edp_std", 0.0)
+
+                    label = None
+                    if strategy not in seen:
+                        label = label_mapping.get(strategy, nice_strategy(strategy))
+                        seen.add(strategy)
+
+                    ax.errorbar(
+                        sp,
+                        y_val,
+                        yerr=err,
+                        fmt=strategy_markers[strategy],
+                        markersize=7,
+                        color=strategy_colors[strategy],
+                        ecolor=strategy_colors[strategy],
+                        capsize=4,
+                        linestyle='None',
+                        elinewidth=1,
+                        markeredgecolor='black',
+                        markeredgewidth=0.6,
+                        label=label,
+                        zorder=4,
+                    )
+
+        tick_positions = (
+            sorted({*xs, *[sp for strategy_values in dynamic_points.values() for sp in strategy_values.keys()]})
+            if dynamic_points
+            else xs
+        )
+        ax.set_xticks(tick_positions)
+        ax.set_xticklabels([f"{tick:.2f}" for tick in tick_positions], fontsize=9)
+        ax.tick_params(axis='y', labelsize=9)
+
+        ax.set_xlabel("start_powercap", fontsize=9)
+        ax.set_ylabel(ylabel, fontsize=9)
+        ax.set_title(
+            f"{app_name}: Dynamic Optimization vs Equal Split on {metric_title} (Start Power Cap)",
+            fontsize=10,
+        )
+        ax.grid(True, linestyle='--', alpha=0.3)
+
+        ax.legend(fontsize=9, loc='best')
+
+        candidates: list[tuple[float, float, str]] = []
+        for x_val, y_val in zip(xs, ys):
+            if not np.isnan(y_val):
+                candidates.append((y_val, x_val, "Equal Split"))
+        for strategy in strategy_list:
+            for sp, values in dynamic_points[strategy].items():
+                y_val = values.get(metric_key)
+                if y_val is None or np.isnan(y_val):
+                    continue
+                label = label_mapping.get(strategy, strategy)
+                candidates.append((y_val, sp, label))
+        if candidates:
+            best_val, best_x, best_label = min(candidates, key=lambda t: t[0])
+            ax.annotate(
+                f"{best_label}: {best_val:.3f}",
+                xy=(best_x, best_val),
+                xytext=(6, -12),
+                textcoords='offset points',
+                fontsize=9,
+                bbox=dict(boxstyle="round,pad=0.25", fc='white', ec='red', lw=0.9, alpha=0.9),
+                arrowprops=dict(arrowstyle='->', color='red', lw=0.8),
+            )
+
+        plt.tight_layout()
+        out_path = Path(out_dir) / f"{app_name}_equal_split_dynamic_{nodes_label}_{suffix}.png"
+        plt.savefig(out_path, dpi=800)
+        plt.close(fig)

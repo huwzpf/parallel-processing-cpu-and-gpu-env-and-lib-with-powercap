@@ -109,8 +109,8 @@ void __cudampi__updatePowerCap(float v, int i) {
 
 void __cudampi__applyAllPowercaps(void) {
   // Push configured power caps to devices based on selected strategy
-  if (__cudampi__powercapStrategy == CONTINOUS_EQUAL ||
-      __cudampi__powercapStrategy == EQUAL_SHARE_CONTINOUS_EQUAL ||
+  if (__cudampi__powercapStrategy == CONTINUOUS_GREEDY ||
+      __cudampi__powercapStrategy == EQUAL_SHARE_CONTINUOUS_GREEDY ||
       __cudampi__powercapStrategy == EQUAL_SPLIT ||
       __cudampi__powercapStrategy == EDP_GRADIENT_SIMPLE ||
       __cudampi__powercapStrategy == EDP_GRADIENT_SPSA ||
@@ -1225,7 +1225,7 @@ void __cudampi__loadAndLogPowercapConfig(void) {
   powercap_config_t file_config;
   if (load_powercap_config("powercap.conf", &file_config) == 0) {
     __cudampi__powercapStrategy = file_config.strategy;
-    if (file_config.strategy == CONTINOUS_EQUAL || file_config.strategy == EQUAL_SHARE_CONTINOUS_EQUAL) {
+    if (file_config.strategy == CONTINUOUS_GREEDY || file_config.strategy == EQUAL_SHARE_CONTINUOUS_GREEDY) {
       __cudampi__cpu_min_powercap = file_config.cpu_min_powercap;
       __cudampi__gpu_min_powercap = file_config.gpu_min_powercap;
     } else if (file_config.strategy == EQUAL_SPLIT) {
@@ -1263,13 +1263,13 @@ void __cudampi__loadAndLogPowercapConfig(void) {
     case EQUAL_SHARE_BINARY_GREEDY:
       log_message(LOG_INFO, "Powercap strategy: EQUAL_SHARE_BINARY_GREEDY");
       break;
-    case CONTINOUS_EQUAL:
-      log_message(LOG_INFO, "Powercap strategy: CONTINOUS_EQUAL");
+    case CONTINUOUS_GREEDY:
+      log_message(LOG_INFO, "Powercap strategy: CONTINUOUS_GREEDY");
       log_message(LOG_INFO, "CPU min powercap (part of range): %f", __cudampi__cpu_min_powercap);
       log_message(LOG_INFO, "GPU min powercap (part of range): %f", __cudampi__gpu_min_powercap);
       break;
-    case EQUAL_SHARE_CONTINOUS_EQUAL:
-      log_message(LOG_INFO, "Powercap strategy: EQUAL_SHARE_CONTINOUS_EQUAL");
+    case EQUAL_SHARE_CONTINUOUS_GREEDY:
+      log_message(LOG_INFO, "Powercap strategy: EQUAL_SHARE_CONTINUOUS_GREEDY");
       log_message(LOG_INFO, "CPU min powercap (part of range): %f", __cudampi__cpu_min_powercap);
       log_message(LOG_INFO, "GPU min powercap (part of range): %f", __cudampi__gpu_min_powercap);
       break;
@@ -1431,7 +1431,7 @@ void __cudampi__applyInitialPowercapsForStrategy(void) {
     }
   }
 
-  if ((__cudampi__powercapStrategy == CONTINOUS_EQUAL || __cudampi__powercapStrategy == EQUAL_SHARE_CONTINOUS_EQUAL) && __cudampi__globalpowerlimit > 0.0f) {
+  if ((__cudampi__powercapStrategy == CONTINUOUS_GREEDY || __cudampi__powercapStrategy == EQUAL_SHARE_CONTINUOUS_GREEDY) && __cudampi__globalpowerlimit > 0.0f) {
     float totalMinPowerCap = 0.0f;
     for (int i = 0; i < __cudampi_totaldevicecount; i++) {
       totalMinPowerCap += __cudampi__devicePowerConfig[i].minPowerCap;
@@ -1516,9 +1516,9 @@ void __cudampi__powercappingManagerStep(void) {
       }
     }
   }
-  else if (__cudampi__powercapStrategy == CONTINOUS_EQUAL || __cudampi__powercapStrategy == EQUAL_SHARE_CONTINOUS_EQUAL) {
+  else if (__cudampi__powercapStrategy == CONTINUOUS_GREEDY || __cudampi__powercapStrategy == EQUAL_SHARE_CONTINUOUS_GREEDY) {
     if (!selecteddevices) {
-      if (__cudampi__powercapStrategy == EQUAL_SHARE_CONTINOUS_EQUAL) {
+      if (__cudampi__powercapStrategy == EQUAL_SHARE_CONTINUOUS_GREEDY) {
         selecteddevices = __cudampi__SelectPowercapEqualEqualShare();
       } else {
         selecteddevices = __cudampi__selectpowercap_equal();

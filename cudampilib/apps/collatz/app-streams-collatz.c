@@ -25,7 +25,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OU
 #include "utility.h"
 
 // Replay the logical dataset multiple times without allocating extra host memory.
-#define ITERS 30
+#define ITERS 25
 
 struct __cudampi__arguments_type __cudampi__arguments;
 
@@ -197,7 +197,7 @@ int main(int argc, char **argv)
       }
 
       privatecounter++;
-      if (privatecounter % 2) 
+      if (privatecounter % 4 == 0) 
       {
         __cudampi__deviceSynchronize();
 

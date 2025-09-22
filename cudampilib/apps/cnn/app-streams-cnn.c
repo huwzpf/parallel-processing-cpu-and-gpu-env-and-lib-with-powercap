@@ -76,8 +76,8 @@ int main(int argc, char **argv)
   if (__cudampi__powercapStrategy == BINARY_GREEDY) {
     __cudampi__powercapStrategy = EQUAL_SHARE_BINARY_GREEDY;
   }
-  if (__cudampi__powercapStrategy == CONTINOUS_EQUAL) {
-    __cudampi__powercapStrategy = EQUAL_SHARE_CONTINOUS_EQUAL;
+  if (__cudampi__powercapStrategy == CONTINUOUS_GREEDY) {
+    __cudampi__powercapStrategy = EQUAL_SHARE_CONTINUOUS_GREEDY;
   }
 
   streamcount = __cudampi__arguments.number_of_streams;
