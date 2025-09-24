@@ -1110,6 +1110,15 @@ def equal_split_dynamic_annotations_plot(
     equal_rows.sort(key=lambda row: row["start_powercap"])
     xs = [row["start_powercap"] for row in equal_rows]
 
+    baseline_edp: dict[float, float] = {}
+    for row in equal_rows:
+        edp_val = row.get("edp")
+        if edp_val is None or np.isnan(edp_val):
+            continue
+        sp_key = round(row["start_powercap"], 6)
+        baseline_edp[sp_key] = edp_val
+    baseline_powercaps = sorted(baseline_edp.keys())
+
     app_name = getattr(equal_split_results.experiment_result[0].parameters, "app_name", "app")
     try:
         nodes_set = {
@@ -1196,9 +1205,9 @@ def equal_split_dynamic_annotations_plot(
 
 
     metrics = (
-        ("energy_used", "Energy Used", "energy_used", "Energy used"),
-        ("execution_duration", "Execution Duration", "time", "Time"),
-        ("edp", "Energy-Delay Product", "edp", "EDP"),
+        ("energy_used", "Energy Used", "energy_used", "Energy used", "energy_used_std"),
+        ("execution_duration", "Execution Duration", "time", "Time", "execution_duration_std"),
+        ("edp", "Energy-Delay Product", "edp", "EDP", "edp_std"),
     )
 
     label_mapping = {
@@ -1419,6 +1428,15 @@ def dynamic_search_trajectories_plot(
     equal_rows.sort(key=lambda row: row["start_powercap"])
     xs = [row["start_powercap"] for row in equal_rows]
 
+    baseline_edp: dict[float, float] = {}
+    for row in equal_rows:
+        edp_val = row.get("edp")
+        if edp_val is None or np.isnan(edp_val):
+            continue
+        sp_key = round(row["start_powercap"], 6)
+        baseline_edp[sp_key] = edp_val
+    baseline_powercaps = sorted(baseline_edp.keys())
+
     app_name = getattr(equal_split_results.experiment_result[0].parameters, "app_name", "app")
     try:
         nodes_set = {
@@ -1494,7 +1512,6 @@ def dynamic_search_trajectories_plot(
         ("execution_duration", "Execution Duration", "time", "Time"),
         ("edp", "Energy-Delay Product", "edp", "EDP"),
     )
-
     label_mapping = {
         "EDP_GRADIENT_CMAES": "CMA-ES",
         "EDP_GRADIENT_SPSA": "Gradient SPSA",
@@ -1568,7 +1585,7 @@ def dynamic_search_trajectories_plot(
                     x_vals,
                     y_vals,
                     linestyle=line_style,
-                    linewidth=1.2,
+                    linewidth=2,
                     marker='o',
                     markersize=MARKER_SIZE + 1,
                     color=color,
@@ -1596,19 +1613,16 @@ def dynamic_search_trajectories_plot(
         plt.close(fig)
 
 
-def dynamic_search_best_configurations_plot(
-    equal_split_results: ExperimentResult,
-    dynamic_search_results: ExperimentResult | None,
-    out_dir: str = "plots_dynamic_search_best",
-) -> None:
-    """Plot best-per-strategy configurations plus the overall best against the baseline."""
 
-    if (
-        dynamic_search_results is None
-        or not dynamic_search_results.experiment_result
-        or equal_split_results is None
-        or not equal_split_results.experiment_result
-    ):
+
+def dynamic_trajectories_plot(
+    equal_split_results: ExperimentResult,
+    dynamic_best_results: ExperimentResult | None,
+    out_dir: str = "plots_dynamic_search",
+):
+    """Plot only the best dynamic trajectories against the equal-split baseline."""
+
+    if dynamic_best_results is None or not dynamic_best_results.experiment_result:
         return
 
     Path(out_dir).mkdir(parents=True, exist_ok=True)
@@ -1656,9 +1670,10 @@ def dynamic_search_best_configurations_plot(
             energies = [run.energy_used for run in result.runs]
             if not durations or not energies:
                 continue
+            avg_time = float(np.mean(durations))
+            avg_energy = float(np.mean(energies))
             edp_samples = [d * e for d, e in zip(durations, energies)]
-            if not edp_samples:
-                continue
+            avg_edp = float(np.mean(edp_samples))
 
             def stddev(values: list[float]) -> float:
                 if len(values) <= 1:
@@ -1667,7 +1682,11 @@ def dynamic_search_best_configurations_plot(
 
             rows.append({
                 "start_powercap": float(sp),
-                "edp": float(np.mean(edp_samples)),
+                "execution_duration": avg_time,
+                "energy_used": avg_energy,
+                "edp": avg_edp,
+                "execution_duration_std": stddev(durations),
+                "energy_used_std": stddev(energies),
                 "edp_std": stddev(edp_samples),
             })
         return rows
@@ -1677,11 +1696,17 @@ def dynamic_search_best_configurations_plot(
         return
 
     equal_rows.sort(key=lambda row: row["start_powercap"])
+    xs = [row["start_powercap"] for row in equal_rows]
+
     baseline_edp: dict[float, float] = {}
     for row in equal_rows:
-        sp_val = round(row["start_powercap"], 6)
-        baseline_edp[sp_val] = row["edp"]
+        edp_val = row.get("edp")
+        if edp_val is None or np.isnan(edp_val):
+            continue
+        sp_key = round(row["start_powercap"], 6)
+        baseline_edp[sp_key] = edp_val
     baseline_powercaps = sorted(baseline_edp.keys())
+    has_baseline = bool(baseline_powercaps)
 
     app_name = getattr(equal_split_results.experiment_result[0].parameters, "app_name", "app")
     try:
@@ -1696,36 +1721,139 @@ def dynamic_search_best_configurations_plot(
     except Exception:
         nodes_label = "nodes"
 
-    strategy_configs: dict[str, dict[str, dict[float, dict[str, float]]]] = defaultdict(lambda: defaultdict(dict))
-    for result in dynamic_search_results.experiment_result:
-        strategy = getattr(result.parameters, "strategy", "UNKNOWN") or "UNKNOWN"
-        sp = getattr(result.parameters, "start_powercap", None)
-        if sp is None:
-            continue
+    def collect_best_configs(
+        exp: ExperimentResult,
+    ) -> dict[str, dict[str, list[dict[str, float]]]]:
+        grouped: dict[str, dict[str, list[dict[str, float]]]] = {}
+        for result in exp.experiment_result:
+            strategy = getattr(result.parameters, "strategy", "UNKNOWN") or "UNKNOWN"
+            sp = getattr(result.parameters, "start_powercap", None)
+            if sp is None:
+                continue
 
-        durations = [run.execution_duration for run in result.runs]
-        energies = [run.energy_used for run in result.runs]
-        if not durations or not energies:
-            continue
+            durations = [run.execution_duration for run in result.runs]
+            energies = [run.energy_used for run in result.runs]
+            if not durations or not energies:
+                continue
 
-        edp_samples = [d * e for d, e in zip(durations, energies)]
-        if not edp_samples:
-            continue
+            edp_samples = [d * e for d, e in zip(durations, energies)]
 
-        param_label = build_param_label(strategy, result.parameters)
-        sp_val = round(float(sp), 6)
+            def stddev(values: list[float]) -> float:
+                if len(values) <= 1:
+                    return 0.0
+                return float(np.std(values, ddof=1))
 
-        def average(values: list[float]) -> float:
-            return float(np.mean(values))
+            avg_time = float(np.mean(durations))
+            avg_energy = float(np.mean(energies))
+            avg_edp = float(np.mean(edp_samples))
 
-        strategy_configs[strategy][param_label][sp_val] = {
-            "start_powercap": sp_val,
-            "edp": average(edp_samples),
-            "edp_std": float(np.std(edp_samples, ddof=1)) if len(edp_samples) > 1 else 0.0,
-        }
+            param_label = build_param_label(strategy, result.parameters)
 
-    if not strategy_configs:
+            entry = {
+                "start_powercap": float(sp),
+                "execution_duration": avg_time,
+                "energy_used": avg_energy,
+                "edp": avg_edp,
+                "execution_duration_std": stddev(durations),
+                "energy_used_std": stddev(energies),
+                "edp_std": stddev(edp_samples),
+                "param_label": param_label,
+            }
+
+            strategy_map = grouped.setdefault(strategy, {})
+            strategy_map.setdefault(param_label, []).append(entry)
+
+        for strategy_map in grouped.values():
+            for entries in strategy_map.values():
+                entries.sort(key=lambda item: item["start_powercap"])
+        return grouped
+
+    best_configs_map = collect_best_configs(dynamic_best_results)
+    if not best_configs_map:
         return
+
+    best_per_strategy: dict[str, dict[str, object]] = {}
+    for strategy, configs in best_configs_map.items():
+        best_info: dict[str, object] | None = None
+        for param_label, entries in configs.items():
+            if not entries:
+                continue
+
+            candidate_entries = sorted(entries, key=lambda item: item["start_powercap"])
+
+            if has_baseline:
+                entry_map: dict[float, dict[str, float]] = {}
+                for entry in candidate_entries:
+                    edp_val = entry.get("edp")
+                    if edp_val is None or np.isnan(edp_val):
+                        continue
+                    sp_key = round(entry["start_powercap"], 6)
+                    entry_map[sp_key] = entry
+                common_keys = [sp for sp in baseline_powercaps if sp in entry_map]
+                if not common_keys:
+                    continue
+                candidate_entries = [entry_map[sp] for sp in common_keys]
+                candidate_entries.sort(key=lambda item: item["start_powercap"])
+                improvements = [baseline_edp[sp] - entry_map[sp]["edp"] for sp in common_keys]
+                avg_improvement = float(np.mean(improvements))
+            else:
+                avg_improvement = float("nan")
+
+            edps = [
+                entry.get("edp")
+                for entry in candidate_entries
+                if entry.get("edp") is not None and not np.isnan(entry["edp"])
+            ]
+            if not edps:
+                continue
+            avg_edp = float(np.mean(edps))
+
+            candidate = {
+                "param_label": param_label,
+                "entries": candidate_entries,
+                "avg_improvement": avg_improvement,
+                "avg_edp": avg_edp,
+            }
+
+            if best_info is None:
+                best_info = candidate
+            else:
+                if has_baseline and not np.isnan(candidate["avg_improvement"]):
+                    if (
+                        np.isnan(best_info["avg_improvement"])
+                        or candidate["avg_improvement"] > best_info["avg_improvement"]
+                    ):
+                        best_info = candidate
+                elif not has_baseline and candidate["avg_edp"] < best_info["avg_edp"]:
+                    best_info = candidate
+
+        if best_info is not None:
+            best_per_strategy[strategy] = best_info
+
+    if not best_per_strategy:
+        for strategy, configs in best_configs_map.items():
+            for param_label, entries in configs.items():
+                if not entries:
+                    continue
+                edps = [
+                    entry.get("edp")
+                    for entry in entries
+                    if entry.get("edp") is not None and not np.isnan(entry["edp"])
+                ]
+                avg_edp = float(np.mean(edps)) if edps else float("nan")
+                best_per_strategy[strategy] = {
+                    "param_label": param_label,
+                    "entries": sorted(entries, key=lambda item: item["start_powercap"]),
+                    "avg_improvement": float("nan"),
+                    "avg_edp": avg_edp,
+                }
+                break
+
+    metrics = (
+        ("energy_used", "Energy Used", "energy_used", "Energy used", "energy_used_std"),
+        ("execution_duration", "Execution Duration", "time", "Time", "execution_duration_std"),
+        ("edp", "Energy-Delay Product", "edp", "EDP", "edp_std"),
+    )
 
     label_mapping = {
         "EDP_GRADIENT_CMAES": "CMA-ES",
@@ -1733,109 +1861,169 @@ def dynamic_search_best_configurations_plot(
         "EDP_GRADIENT_SIMPLE": "Gradient Simple",
     }
 
-    best_per_strategy: dict[str, tuple[str, list[tuple[float, float]], float]] = {}
-    best_overall: tuple[str, str, list[tuple[float, float]], float] | None = None
-
-    for strategy, config_map in strategy_configs.items():
-        best_config_label: str | None = None
-        best_config_points: list[tuple[float, float]] | None = None
-        best_avg_improvement = float("-inf")
-        best_avg_edp = float("inf")
-
-        for param_label, entries_by_sp in config_map.items():
-            common_powercaps = sorted(set(entries_by_sp.keys()) & set(baseline_powercaps))
-            if not common_powercaps:
-                continue
-
-            points = [(sp, entries_by_sp[sp]["edp"]) for sp in common_powercaps]
-
-            edps = [entries_by_sp[sp]["edp"] for sp in common_powercaps]
-            improvements = [baseline_edp[sp] - entries_by_sp[sp]["edp"] for sp in common_powercaps]
-
-            avg_improvement = float(np.mean(improvements))
-            avg_edp = float(np.mean(edps))
-
-            if avg_improvement > best_avg_improvement:
-                best_avg_improvement = avg_improvement
-                best_avg_edp = avg_edp
-                best_config_label = param_label
-                best_config_points = points
-
-            if best_overall is None or avg_edp < best_overall[3]:
-                best_overall = (strategy, param_label, points, avg_edp)
-
-        if best_config_label and best_config_points is not None:
-            best_per_strategy[strategy] = (
-                best_config_label,
-                best_config_points,
-                best_avg_edp,
-            )
-
-    if not best_per_strategy:
-        return
-
-    fig, ax = plt.subplots(figsize=(7, 4))
-
-    ax.plot(
-        baseline_powercaps,
-        [baseline_edp[sp] for sp in baseline_powercaps],
-        linestyle='-',
-        color='black',
-        linewidth=2.0,
-        marker='o',
-        markersize=MARKER_SIZE,
-        label="Equal Split",
-    )
+    if best_per_strategy:
+        print(f"[dynamic_best] {app_name} ({nodes_label}) best configs vs equal split:")
+        for strategy, info in sorted(best_per_strategy.items()):
+            friendly_name = label_mapping.get(strategy, nice_strategy(strategy))
+            param_label = info["param_label"]
+            avg_improvement = info["avg_improvement"]
+            avg_edp = info["avg_edp"]
+            if not np.isnan(avg_improvement):
+                print(
+                    f"  {friendly_name}: {param_label} | avg EDP={avg_edp:.4f}, avg ΔEDP={avg_improvement:.4f}"
+                )
+            else:
+                print(
+                    f"  {friendly_name}: {param_label} | avg EDP={avg_edp:.4f}"
+                )
 
     cmap = plt.get_cmap('tab10')
-    for idx, (strategy, (_, points, _)) in enumerate(sorted(best_per_strategy.items())):
-        friendly_name = label_mapping.get(strategy, nice_strategy(strategy))
-        color = cmap(idx % cmap.N)
-        x_vals = [sp for sp, _ in points]
-        y_vals = [edp for _, edp in points]
+    base_palette = {
+        "EDP_GRADIENT_CMAES": (0.8, 0.2, 0.2),
+        "EDP_GRADIENT_SIMPLE": to_rgb("#1f77b4"),
+        "EDP_GRADIENT_SPSA": to_rgb("#2ca02c"),
+    }
+    strategy_list = sorted(best_configs_map.keys())
+    strategy_colors = {}
+    for idx, strategy in enumerate(strategy_list):
+        color = base_palette.get(strategy)
+        if color is None:
+            color = cmap(idx % cmap.N)
+        strategy_colors[strategy] = color
 
-        ax.plot(
-            x_vals,
-            y_vals,
-            linestyle='--',
-            linewidth=1.5,
-            marker='s',
-            markersize=MARKER_SIZE + 1,
-            color=color,
-            label=f"{friendly_name} best avg ΔEDP",
-        )
+    best_powercaps = {
+        entry["start_powercap"]
+        for info in best_per_strategy.values()
+        for entry in info["entries"]
+    }
 
-    if best_overall is not None:
-        overall_strategy, _, overall_points, _ = best_overall
-        overall_x = [sp for sp, _ in overall_points]
-        overall_y = [edp for _, edp in overall_points]
-        overall_label = label_mapping.get(overall_strategy, nice_strategy(overall_strategy))
+    for metric_key, ylabel, suffix, metric_title, std_key in metrics:
+        ys = [row[metric_key] for row in equal_rows]
+        y_errs = []
+        for row in equal_rows:
+            std_val = row.get(std_key, 0.0)
+            if std_val is None or np.isnan(std_val):
+                y_errs.append(0.0)
+            else:
+                y_errs.append(float(std_val))
+        fig, ax = plt.subplots(figsize=(7, 4))
 
-        ax.plot(
-            overall_x,
-            overall_y,
-            linestyle='-',
+        ax.errorbar(
+            xs,
+            ys,
+            yerr=y_errs,
+            fmt='-o',
+            color='black',
             linewidth=2.0,
-            marker='D',
-            markersize=MARKER_SIZE + 1,
-            color='tab:red',
-            label=f"Overall best ({overall_label})",
+            markersize=MARKER_SIZE,
+            capsize=CAPSIZE,
+            elinewidth=ELINEWIDTH,
+            capthick=CAPTHICK,
+            label="Equal Split",
         )
 
-    ax.set_xticks(baseline_powercaps)
-    ax.set_xticklabels([f"{tick:.2f}" for tick in baseline_powercaps], fontsize=9)
-    ax.tick_params(axis='y', labelsize=9)
+        baseline_best_x = None
+        baseline_best_y = None
+        for x_val, y_val in zip(xs, ys):
+            if y_val is None or np.isnan(y_val):
+                continue
+            if baseline_best_y is None or y_val < baseline_best_y:
+                baseline_best_x = x_val
+                baseline_best_y = y_val
+        if baseline_best_x is not None and baseline_best_y is not None:
+            label_text = fmt_value(baseline_best_y)
+            ax.annotate(
+                label_text,
+                (baseline_best_x, baseline_best_y),
+                textcoords="offset points",
+                xytext=(0, 8),
+                ha='center',
+                va='bottom',
+                fontsize=8,
+                color='black',
+                bbox={"boxstyle": "round,pad=0.2", "fc": "white", "alpha": 0.6, "ec": "none"},
+            )
 
-    ax.set_xlabel("start_powercap", fontsize=9)
-    ax.set_ylabel("EDP", fontsize=9)
-    ax.set_title(
-        f"{app_name}: Best Dynamic Trajectories vs Equal Split (EDP)",
-        fontsize=10,
-    )
-    ax.grid(True, linestyle='--', alpha=0.3)
-    ax.legend(fontsize=8, loc='best')
+        for strategy in strategy_list:
+            info = best_per_strategy.get(strategy)
+            if info is None:
+                continue
 
-    plt.tight_layout()
-    out_path = Path(out_dir) / f"{app_name}_dynamic_search_best_{nodes_label}_edp.png"
-    plt.savefig(out_path, dpi=800)
-    plt.close(fig)
+            entries = info["entries"]
+            x_vals: list[float] = []
+            y_vals: list[float] = []
+            y_errs: list[float] = []
+            for entry in entries:
+                value = entry.get(metric_key)
+                if value is None or np.isnan(value):
+                    continue
+                x_vals.append(entry["start_powercap"])
+                y_vals.append(value)
+                std_val = entry.get(std_key, 0.0)
+                if std_val is None or np.isnan(std_val):
+                    y_errs.append(0.0)
+                else:
+                    y_errs.append(float(std_val))
+            if not x_vals:
+                continue
+
+            friendly_name = label_mapping.get(strategy, nice_strategy(strategy))
+            color = strategy_colors.get(strategy, cmap(0))
+            legend_label = f"Best {friendly_name}"
+
+            ax.errorbar(
+                x_vals,
+                y_vals,
+                yerr=y_errs,
+                fmt='-D',
+                linewidth=2.4,
+                markersize=MARKER_SIZE + 2,
+                color=color,
+                capsize=CAPSIZE,
+                elinewidth=ELINEWIDTH,
+                capthick=CAPTHICK,
+                label=legend_label,
+                zorder=6,
+            )
+
+            best_x = None
+            best_y = None
+            for x_val, y_val in zip(x_vals, y_vals):
+                if y_val is None or np.isnan(y_val):
+                    continue
+                if best_y is None or y_val < best_y:
+                    best_x = x_val
+                    best_y = y_val
+            if best_x is not None and best_y is not None:
+                label_text = fmt_value(best_y)
+                ax.annotate(
+                    label_text,
+                    (best_x, best_y),
+                    textcoords="offset points",
+                    xytext=(0, 8),
+                    ha='center',
+                    va='bottom',
+                    fontsize=8,
+                    color=color,
+                    bbox={"boxstyle": "round,pad=0.2", "fc": "white", "alpha": 0.6, "ec": "none"},
+                )
+
+        tick_positions = sorted({*xs, *best_powercaps})
+        ax.set_xticks(tick_positions)
+        ax.set_xticklabels([f"{tick:.2f}" for tick in tick_positions], fontsize=9)
+        ax.tick_params(axis='y', labelsize=9)
+
+        ax.set_xlabel("start_powercap", fontsize=9)
+        ax.set_ylabel(ylabel, fontsize=9)
+        ax.set_title(
+            f"{app_name}: Best Dynamic Trajectories on {metric_title} (Start Power Cap)",
+            fontsize=10,
+        )
+        ax.grid(True, linestyle='--', alpha=0.3)
+
+        ax.legend(fontsize=8, loc='best')
+
+        plt.tight_layout()
+        out_path = Path(out_dir) / f"{app_name}_dynamic_search_{nodes_label}_{suffix}.png"
+        plt.savefig(out_path, dpi=800)
+        plt.close(fig)

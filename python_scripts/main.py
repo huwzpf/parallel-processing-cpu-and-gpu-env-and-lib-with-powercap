@@ -9,6 +9,7 @@ from experiments import run_experiment
 # For RNN: NUMBER_OF_RUNS = 5
 NUMBER_OF_RUNS = 3
 
+'''
 # Hand-picked configurations providing the lowest observed EDP for dynamic powercap experiments
 BEST_DYNAMIC_CONFIGS = {
     "twinprime": [
@@ -43,6 +44,77 @@ BEST_DYNAMIC_CONFIGS = {
         {"strategy": "EDP_GRADIENT_SPSA", "start_powercap": 0.2, "edp_optimization_steps": 50, "start_alpha": 0.2, "gradient_opt_eps": 0.2, "epsilon_decay": 0.95, "alpha_decay": 0.98},
         {"strategy": "EDP_GRADIENT_SPSA", "start_powercap": 0.5, "edp_optimization_steps": 100, "start_alpha": 0.1, "gradient_opt_eps": 0.2, "epsilon_decay": 0.95, "alpha_decay": 0.95},
         {"strategy": "EDP_GRADIENT_SPSA", "start_powercap": 0.8, "edp_optimization_steps": 50, "start_alpha": 0.1, "gradient_opt_eps": 0.1, "epsilon_decay": 0.98, "alpha_decay": 0.95},
+    ],
+}
+'''
+
+
+BEST_DYNAMIC_CONFIGS = {
+    "twinprime": [
+        {"strategy": "EDP_GRADIENT_CMAES", "start_powercap": 0.2, "edp_optimization_steps": 16, "gradient_opt_eps": 0.1},
+        {"strategy": "EDP_GRADIENT_CMAES", "start_powercap": 0.5, "edp_optimization_steps": 16, "gradient_opt_eps": 0.1},
+        {"strategy": "EDP_GRADIENT_CMAES", "start_powercap": 0.8, "edp_optimization_steps": 16, "gradient_opt_eps": 0.1},
+        {"strategy": "EDP_GRADIENT_SIMPLE", "start_powercap": 0.2, "edp_optimization_steps": 0, "start_alpha": 0.1, "gradient_opt_eps": 0.2, "epsilon_decay": 0.9, "alpha_decay": 0.98},
+        {"strategy": "EDP_GRADIENT_SIMPLE", "start_powercap": 0.5, "edp_optimization_steps": 0, "start_alpha": 0.1, "gradient_opt_eps": 0.2, "epsilon_decay": 0.9, "alpha_decay": 0.98},
+        {"strategy": "EDP_GRADIENT_SIMPLE", "start_powercap": 0.8, "edp_optimization_steps": 0, "start_alpha": 0.1, "gradient_opt_eps": 0.2, "epsilon_decay": 0.9, "alpha_decay": 0.98},
+        {"strategy": "EDP_GRADIENT_SPSA", "start_powercap": 0.2, "edp_optimization_steps": 0, "start_alpha": 0.1, "gradient_opt_eps": 0.2, "epsilon_decay": 0.95, "alpha_decay": 0.98},
+        {"strategy": "EDP_GRADIENT_SPSA", "start_powercap": 0.5, "edp_optimization_steps": 0, "start_alpha": 0.1, "gradient_opt_eps": 0.2, "epsilon_decay": 0.95, "alpha_decay": 0.98},
+        {"strategy": "EDP_GRADIENT_SPSA", "start_powercap": 0.8, "edp_optimization_steps": 0, "start_alpha": 0.1, "gradient_opt_eps": 0.2, "epsilon_decay": 0.95, "alpha_decay": 0.98},
+    ],
+    "montecarlo": [
+        {"strategy": "EDP_GRADIENT_CMAES", "start_powercap": 0.2, "edp_optimization_steps": 16, "gradient_opt_eps": 0.2},
+        {"strategy": "EDP_GRADIENT_CMAES", "start_powercap": 0.5, "edp_optimization_steps": 16, "gradient_opt_eps": 0.2},
+        {"strategy": "EDP_GRADIENT_CMAES", "start_powercap": 0.8, "edp_optimization_steps": 16, "gradient_opt_eps": 0.2},
+        {"strategy": "EDP_GRADIENT_SIMPLE", "start_powercap": 0.2, "edp_optimization_steps": 8, "start_alpha": 0.1, "gradient_opt_eps": 0.1, "epsilon_decay": 0.9, "alpha_decay": 0.9},
+        {"strategy": "EDP_GRADIENT_SIMPLE", "start_powercap": 0.5, "edp_optimization_steps": 8, "start_alpha": 0.1, "gradient_opt_eps": 0.1, "epsilon_decay": 0.9, "alpha_decay": 0.9},
+        {"strategy": "EDP_GRADIENT_SIMPLE", "start_powercap": 0.8, "edp_optimization_steps": 8, "start_alpha": 0.1, "gradient_opt_eps": 0.1, "epsilon_decay": 0.9, "alpha_decay": 0.9},
+        {"strategy": "EDP_GRADIENT_SPSA", "start_powercap": 0.2, "edp_optimization_steps": 0, "start_alpha": 0.2, "gradient_opt_eps": 0.1, "epsilon_decay": 0.98, "alpha_decay": 0.95},
+        {"strategy": "EDP_GRADIENT_SPSA", "start_powercap": 0.5, "edp_optimization_steps": 0, "start_alpha": 0.2, "gradient_opt_eps": 0.1, "epsilon_decay": 0.98, "alpha_decay": 0.95},
+        {"strategy": "EDP_GRADIENT_SPSA", "start_powercap": 0.8, "edp_optimization_steps": 0, "start_alpha": 0.2, "gradient_opt_eps": 0.1, "epsilon_decay": 0.98, "alpha_decay": 0.95},
+    ],
+    "cnn": [
+        {"strategy": "EDP_GRADIENT_CMAES", "start_powercap": 0.2, "edp_optimization_steps": 16, "gradient_opt_eps": 0.1},
+        {"strategy": "EDP_GRADIENT_CMAES", "start_powercap": 0.5, "edp_optimization_steps": 16, "gradient_opt_eps": 0.1},
+        {"strategy": "EDP_GRADIENT_CMAES", "start_powercap": 0.8, "edp_optimization_steps": 16, "gradient_opt_eps": 0.1},
+        {"strategy": "EDP_GRADIENT_SIMPLE", "start_powercap": 0.2, "edp_optimization_steps": 0, "start_alpha": 0.1, "gradient_opt_eps": 0.1, "epsilon_decay": 0.98, "alpha_decay": 0.98},
+        {"strategy": "EDP_GRADIENT_SIMPLE", "start_powercap": 0.5, "edp_optimization_steps": 0, "start_alpha": 0.1, "gradient_opt_eps": 0.1, "epsilon_decay": 0.98, "alpha_decay": 0.98},
+        {"strategy": "EDP_GRADIENT_SIMPLE", "start_powercap": 0.8, "edp_optimization_steps": 0, "start_alpha": 0.1, "gradient_opt_eps": 0.1, "epsilon_decay": 0.98, "alpha_decay": 0.98},
+        {"strategy": "EDP_GRADIENT_SPSA", "start_powercap": 0.2, "edp_optimization_steps": 50, "start_alpha": 0.2, "gradient_opt_eps": 0.2, "epsilon_decay": 0.95, "alpha_decay": 0.98},
+        {"strategy": "EDP_GRADIENT_SPSA", "start_powercap": 0.5, "edp_optimization_steps": 50, "start_alpha": 0.2, "gradient_opt_eps": 0.2, "epsilon_decay": 0.95, "alpha_decay": 0.98},
+        {"strategy": "EDP_GRADIENT_SPSA", "start_powercap": 0.8, "edp_optimization_steps": 50, "start_alpha": 0.2, "gradient_opt_eps": 0.2, "epsilon_decay": 0.95, "alpha_decay": 0.98},
+    ],
+    "collatz": [
+        {"strategy": "EDP_GRADIENT_CMAES", "start_powercap": 0.2, "edp_optimization_steps": 16, "gradient_opt_eps": 0.1},
+        {"strategy": "EDP_GRADIENT_CMAES", "start_powercap": 0.5, "edp_optimization_steps": 16, "gradient_opt_eps": 0.1},
+        {"strategy": "EDP_GRADIENT_CMAES", "start_powercap": 0.8, "edp_optimization_steps": 16, "gradient_opt_eps": 0.1},
+        {"strategy": "EDP_GRADIENT_SIMPLE", "start_powercap": 0.2, "edp_optimization_steps": 0, "start_alpha": 0.1, "gradient_opt_eps": 0.2, "epsilon_decay": 0.9, "alpha_decay": 0.98},
+        {"strategy": "EDP_GRADIENT_SIMPLE", "start_powercap": 0.5, "edp_optimization_steps": 0, "start_alpha": 0.1, "gradient_opt_eps": 0.2, "epsilon_decay": 0.9, "alpha_decay": 0.98},
+        {"strategy": "EDP_GRADIENT_SIMPLE", "start_powercap": 0.8, "edp_optimization_steps": 0, "start_alpha": 0.1, "gradient_opt_eps": 0.2, "epsilon_decay": 0.9, "alpha_decay": 0.98},
+        {"strategy": "EDP_GRADIENT_SPSA", "start_powercap": 0.2, "edp_optimization_steps": 0, "start_alpha": 0.1, "gradient_opt_eps": 0.2, "epsilon_decay": 0.95, "alpha_decay": 0.98},
+        {"strategy": "EDP_GRADIENT_SPSA", "start_powercap": 0.5, "edp_optimization_steps": 0, "start_alpha": 0.1, "gradient_opt_eps": 0.2, "epsilon_decay": 0.95, "alpha_decay": 0.98},
+        {"strategy": "EDP_GRADIENT_SPSA", "start_powercap": 0.8, "edp_optimization_steps": 0, "start_alpha": 0.1, "gradient_opt_eps": 0.2, "epsilon_decay": 0.95, "alpha_decay": 0.98},
+    ],
+    "vecmaxdiv": [
+        {"strategy": "EDP_GRADIENT_CMAES", "start_powercap": 0.2, "edp_optimization_steps": 16, "gradient_opt_eps": 0.2},
+        {"strategy": "EDP_GRADIENT_CMAES", "start_powercap": 0.5, "edp_optimization_steps": 16, "gradient_opt_eps": 0.2},
+        {"strategy": "EDP_GRADIENT_CMAES", "start_powercap": 0.8, "edp_optimization_steps": 16, "gradient_opt_eps": 0.2},
+        {"strategy": "EDP_GRADIENT_SIMPLE", "start_powercap": 0.2, "edp_optimization_steps": 8, "start_alpha": 0.1, "gradient_opt_eps": 0.1, "epsilon_decay": 0.9, "alpha_decay": 0.9},
+        {"strategy": "EDP_GRADIENT_SIMPLE", "start_powercap": 0.5, "edp_optimization_steps": 8, "start_alpha": 0.1, "gradient_opt_eps": 0.1, "epsilon_decay": 0.9, "alpha_decay": 0.9},
+        {"strategy": "EDP_GRADIENT_SIMPLE", "start_powercap": 0.8, "edp_optimization_steps": 8, "start_alpha": 0.1, "gradient_opt_eps": 0.1, "epsilon_decay": 0.9, "alpha_decay": 0.9},
+        {"strategy": "EDP_GRADIENT_SPSA", "start_powercap": 0.2, "edp_optimization_steps": 0, "start_alpha": 0.2, "gradient_opt_eps": 0.1, "epsilon_decay": 0.98, "alpha_decay": 0.95},
+        {"strategy": "EDP_GRADIENT_SPSA", "start_powercap": 0.5, "edp_optimization_steps": 0, "start_alpha": 0.2, "gradient_opt_eps": 0.1, "epsilon_decay": 0.98, "alpha_decay": 0.95},
+        {"strategy": "EDP_GRADIENT_SPSA", "start_powercap": 0.8, "edp_optimization_steps": 0, "start_alpha": 0.2, "gradient_opt_eps": 0.1, "epsilon_decay": 0.98, "alpha_decay": 0.95},
+    ],
+    "rnn": [
+        {"strategy": "EDP_GRADIENT_CMAES", "start_powercap": 0.2, "edp_optimization_steps": 16, "gradient_opt_eps": 0.1},
+        {"strategy": "EDP_GRADIENT_CMAES", "start_powercap": 0.5, "edp_optimization_steps": 16, "gradient_opt_eps": 0.1},
+        {"strategy": "EDP_GRADIENT_CMAES", "start_powercap": 0.8, "edp_optimization_steps": 16, "gradient_opt_eps": 0.1},
+        {"strategy": "EDP_GRADIENT_SIMPLE", "start_powercap": 0.2, "edp_optimization_steps": 0, "start_alpha": 0.1, "gradient_opt_eps": 0.1, "epsilon_decay": 0.98, "alpha_decay": 0.98},
+        {"strategy": "EDP_GRADIENT_SIMPLE", "start_powercap": 0.5, "edp_optimization_steps": 0, "start_alpha": 0.1, "gradient_opt_eps": 0.1, "epsilon_decay": 0.98, "alpha_decay": 0.98},
+        {"strategy": "EDP_GRADIENT_SIMPLE", "start_powercap": 0.8, "edp_optimization_steps": 0, "start_alpha": 0.1, "gradient_opt_eps": 0.1, "epsilon_decay": 0.98, "alpha_decay": 0.98},
+        {"strategy": "EDP_GRADIENT_SPSA", "start_powercap": 0.2, "edp_optimization_steps": 50, "start_alpha": 0.2, "gradient_opt_eps": 0.2, "epsilon_decay": 0.95, "alpha_decay": 0.98},
+        {"strategy": "EDP_GRADIENT_SPSA", "start_powercap": 0.5, "edp_optimization_steps": 50, "start_alpha": 0.2, "gradient_opt_eps": 0.2, "epsilon_decay": 0.95, "alpha_decay": 0.98},
+        {"strategy": "EDP_GRADIENT_SPSA", "start_powercap": 0.8, "edp_optimization_steps": 50, "start_alpha": 0.2, "gradient_opt_eps": 0.2, "epsilon_decay": 0.95, "alpha_decay": 0.98},
     ],
 }
 
@@ -261,7 +333,7 @@ def experiment_best_dynamic(description: str, app_name: str, file_path: str | os
         experiment_configurations=[common_run_parameters(**config) for config in app_configs],
     )
 
-    run_experiment(experiment_file_name=file_path, experiment=experiment, number_of_runs=5)
+    run_experiment(experiment_file_name=file_path, experiment=experiment, number_of_runs=3)
 
 def experiment_time_batch_size(description: str, app_name: str, file_path: str | os.PathLike, number_of_nodes: int):
     common_run_parameters = functools.partial(
@@ -359,12 +431,27 @@ if __name__ == "__main__":
     # experiment_equal_split(description="equal_powercap", app_name="twinprime", file_path="equal_twinprime_powercap_8_nodes.json", number_od_nodes=8, batch_size=480000, cpu_power_scaling=0, cpu_enabled=True)
     # experiment_best_dynamic(description="best_dynamic_powercap", app_name="montecarlo", file_path="best_dynamic_montecarlo_powercap_8_nodes.json", number_od_nodes=8, batch_size=480000, cpu_power_scaling=0, cpu_enabled=False)
     # experiment_best_dynamic(description="best_dynamic_powercap", app_name="twinprime", file_path="best_dynamic_twinprime_powercap_8_nodes.json", number_od_nodes=8, batch_size=480000, cpu_power_scaling=0, cpu_enabled=True)
-    experiment_best_dynamic(description="best_dynamic_powercap", app_name="cnn", file_path="best_dynamic_cnn_powercap_8_nodes.json", number_od_nodes=8, batch_size=20, cpu_power_scaling=0, cpu_enabled=True)
+    # experiment_best_dynamic(description="best_dynamic_powercap", app_name="cnn", file_path="best_dynamic_cnn_powercap_8_nodes.json", number_od_nodes=8, batch_size=20, cpu_power_scaling=0, cpu_enabled=True)
 
+    # experiment_best_dynamic(description="best_dynamic_powercap", app_name="montecarlo", file_path="trajectories_best_dynamic_montecarlo_powercap_8_nodes.json", number_od_nodes=8, batch_size=480000, cpu_power_scaling=0, cpu_enabled=False)
+    # experiment_best_dynamic(description="best_dynamic_powercap", app_name="twinprime", file_path="trajectories_best_dynamic_twinprime_powercap_8_nodes.json", number_od_nodes=8, batch_size=480000, cpu_power_scaling=0, cpu_enabled=True)
+    
+    # experiment_equal_split(description="equal_powercap", app_name="vecmaxdiv", file_path="trajectories_best_dynamic_vecmaxdiv_powercap_8_nodes.json", number_od_nodes=8, batch_size=480000, cpu_power_scaling=0, cpu_enabled=False)
+    # experiment_equal_split(description="equal_powercap", app_name="collatz", file_path="trajectories_best_dynamic_collatz_powercap_8_nodes.json", number_od_nodes=8, batch_size=480000, cpu_power_scaling=0, cpu_enabled=True)
+    # experiment_best_dynamic(description="best_dynamic_powercap", app_name="vecmaxdiv", file_path="equal_vecmaxdiv_powercap_8_nodes.json", number_od_nodes=8, batch_size=480000, cpu_power_scaling=0, cpu_enabled=False)
+    # experiment_best_dynamic(description="best_dynamic_powercap", app_name="collatz", file_path="equal_collatz_powercap_8_nodes.json", number_od_nodes=8, batch_size=480000, cpu_power_scaling=0, cpu_enabled=True)
+    
+    # experiment_best_dynamic(description="best_dynamic_powercap", app_name="cnn", file_path="trajectories_best_dynamic_cnn_powercap_8_nodes.json", number_od_nodes=8, batch_size=20, cpu_power_scaling=0, cpu_enabled=True)
+    experiment_time_powercap(description="test", app_name="vecmaxdiv", file_path="test_vecmaxdiv_powercap_8_nodes.json", number_od_nodes=8, batch_size=480000, cpu_power_scaling=0, cpu_enabled=False)
+    experiment_time_powercap(description="test", app_name="collatz", file_path="test_collatz_powercap_8_nodes.json", number_od_nodes=8, batch_size=480000, cpu_power_scaling=0, cpu_enabled=True)
+    experiment_time_powercap(description="test", app_name="rnn", file_path="test_cnn_rnn_8_nodes.json", number_od_nodes=8, batch_size=40, cpu_power_scaling=0, cpu_enabled=True)
+    
+    experiment_equal_split(description="equal_powercap", app_name="rnn", file_path="equal_rnn_powercap_8_nodes.json", number_od_nodes=8, batch_size=40, cpu_power_scaling=0, cpu_enabled=True)
+    experiment_best_dynamic(description="best_dynamic_powercap", app_name="rnn", file_path="trajectories_best_dynamic_rnn_powercap_8_nodes.json", number_od_nodes=8, batch_size=40, cpu_power_scaling=0, cpu_enabled=True)
 
-    experiment_time_powercap(description="test", app_name="montecarlo", file_path="test_montecarlo_powercap_8_nodes.json", number_od_nodes=8, batch_size=480000, cpu_power_scaling=0, cpu_enabled=False)
-    experiment_time_powercap(description="test", app_name="twinprime", file_path="test_twinprime_powercap_8_nodes.json", number_od_nodes=8, batch_size=480000, cpu_power_scaling=0, cpu_enabled=True)
-    experiment_time_powercap(description="test", app_name="cnn", file_path="test_cnn_powercap_8_nodes.json", number_od_nodes=8, batch_size=20, cpu_power_scaling=0, cpu_enabled=True)
+    # experiment_time_powercap(description="test", app_name="montecarlo", file_path="test_montecarlo_powercap_8_nodes.json", number_od_nodes=8, batch_size=480000, cpu_power_scaling=0, cpu_enabled=False)
+    # experiment_time_powercap(description="test", app_name="twinprime", file_path="test_twinprime_powercap_8_nodes.json", number_od_nodes=8, batch_size=480000, cpu_power_scaling=0, cpu_enabled=True)
+    # experiment_time_powercap(description="test", app_name="cnn", file_path="test_cnn_powercap_8_nodes.json", number_od_nodes=8, batch_size=20, cpu_power_scaling=0, cpu_enabled=True)
     
     
     # experiment_equal_split(description="equal_powercap", app_name="montecarlo", file_path="equal_montecarlo_powercap_8_nodes.json", number_od_nodes=8, batch_size=480000, cpu_power_scaling=0, cpu_enabled=False)
