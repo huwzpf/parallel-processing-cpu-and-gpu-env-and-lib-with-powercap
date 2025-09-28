@@ -187,15 +187,7 @@ void nvmlSetGpuPowerCap(int gpuid, float powerCap)
   nvmlReturn_t result;
   nvmlDevice_t nvmlDevice;
   unsigned int powerCap_uw = (unsigned int)powerCap;
-  
-  char command[256];
-  snprintf(command, sizeof(command), "echo \"password\" | sudo -S nvidia-smi -i %d -pl %u > /dev/null 2>&1", gpuid, powerCap_uw);
-  int ret = system(command);
-  if (ret != 0) {
-    log_message(LOG_ERROR, "Failed to set power cap using nvidia-smi. Command: %s", command);
-  }
-  
-  /*
+
   result = nvmlDeviceGetHandleByIndex(gpuid, &nvmlDevice);
   if (result != NVML_SUCCESS) {
       log_message(LOG_ERROR, "nvmlDeviceGetHandleByIndex failed: %s", nvmlErrorString(result));
@@ -206,9 +198,10 @@ void nvmlSetGpuPowerCap(int gpuid, float powerCap)
   if (result != NVML_SUCCESS) {
       log_message(LOG_ERROR, "Failed to set power management limit (%ld): %s", powerCap_uw, nvmlErrorString(result));
   }
-  */
 }
 
+// Workaround for lack of permissions to set GPU power cap directly
+// Communicate with a daemon via UNIX socket to set the power cap
 int socketSetGpuPowerCap(int gpuid, float powerCap)
 {
     int sock;
