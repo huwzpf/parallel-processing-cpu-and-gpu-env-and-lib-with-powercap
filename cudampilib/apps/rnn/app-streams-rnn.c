@@ -31,7 +31,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OU
 // Another problem might be host memory used by MPI for sending data around
 // So looks like it's better to just execute multiple iterations on the same data
 // And don't risk running out of memory
-#define ITERS 5
+#define ITERS 150
 
 struct __cudampi__arguments_type __cudampi__arguments;
 
@@ -120,7 +120,6 @@ int main(int argc, char **argv)
     int mythreadid = omp_get_thread_num();
     void *devPtr;
     void *devPtr2;
-    long long privatecounter = 0;
     __cudampi__setDevice(mythreadid);
     #pragma omp barrier
     
@@ -257,25 +256,21 @@ int main(int argc, char **argv)
         }
       }
 
-      privatecounter++;
-      if (privatecounter % 2) 
-      {
-        //log_message(LOG_INFO, "[Thread %d] Completed iteration %d", omp_get_thread_num(), privatecounter);
-        __cudampi__deviceSynchronize();
+      //log_message(LOG_INFO, "[Thread %d] Completed iteration %d", omp_get_thread_num(), privatecounter);
+      __cudampi__deviceSynchronize();
 
-        // Record period between consecutive deviceSynchronize() calls inside the main loop
-        struct timeval now_sync;
-        gettimeofday(&now_sync, NULL);
-        if (has_last_sync_time)
-        {
-          long long delta_us = (now_sync.tv_sec - last_sync_time.tv_sec) * 1000000LL +
-                               (now_sync.tv_usec - last_sync_time.tv_usec);
-          local_sync_sum_us += delta_us;
-          local_sync_intervals += 1;
-        }
-        last_sync_time = now_sync;
-        has_last_sync_time = 1;
+      // Record period between consecutive deviceSynchronize() calls inside the main loop
+      struct timeval now_sync;
+      gettimeofday(&now_sync, NULL);
+      if (has_last_sync_time)
+      {
+        long long delta_us = (now_sync.tv_sec - last_sync_time.tv_sec) * 1000000LL +
+                              (now_sync.tv_usec - last_sync_time.tv_usec);
+        local_sync_sum_us += delta_us;
+        local_sync_intervals += 1;
       }
+      last_sync_time = now_sync;
+      has_last_sync_time = 1;
 
     } while (!finish);
 

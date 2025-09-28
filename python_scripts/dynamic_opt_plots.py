@@ -5,6 +5,36 @@ from charts import (
     dynamic_trajectories_plot
 )
 
+'''
+
+from models import ExperimentResult
+from charts import (
+    equal_split_dynamic_annotations_plot,
+    dynamic_search_trajectories_plot,
+    dynamic_trajectories_plot
+)
+
+vecmaxdiv_raw_path = \
+    "/home/macierz/s184297/parallel-processing-cpu-and-gpu-env-and-lib-with-powercap/cudampilib/4_test_vecmaxdiv_powercap_4_nodes.json"
+vecmaxdiv_trajectories_path = \
+    "/home/macierz/s184297/parallel-processing-cpu-and-gpu-env-and-lib-with-powercap/cudampilib/4_equal_vecmaxdiv_powercap_4_nodes.json"
+vecmaxdiv_equal_path = \
+    "/home/macierz/s184297/parallel-processing-cpu-and-gpu-env-and-lib-with-powercap/cudampilib/4_trajectories_best_dynamic_vecmaxdiv_powercap_4_nodes.json"
+
+
+exp_vecmaxdiv_raw = ExperimentResult.from_file(vecmaxdiv_raw_path)
+vecmaxdiv_defaults = exp_vecmaxdiv_raw.default_metrics()
+exp_vecmaxdiv_equal = ExperimentResult.from_file(vecmaxdiv_equal_path).normalize(vecmaxdiv_defaults)
+exp_vecmaxdiv_trajectories = ExperimentResult.from_file(vecmaxdiv_trajectories_path).normalize(vecmaxdiv_defaults)
+
+    
+dynamic_trajectories_plot (
+    exp_vecmaxdiv_equal,
+    exp_vecmaxdiv_trajectories,
+    out_dir="../WYKRESY_MAGISTERKA/FINAL_DYNAMIC/4_vecmaxdiv_dynamic_best",
+)
+
+'''
 
 twinprime_equal_path = \
     "/home/macierz/s184297/parallel-processing-cpu-and-gpu-env-and-lib-with-powercap/" \
@@ -75,6 +105,17 @@ collatz_trajectories_path = \
     "/home/macierz/s184297/parallel-processing-cpu-and-gpu-env-and-lib-with-powercap/" \
     "WYKRESY_MAGISTERKA/FINAL_DYNAMIC/trajectories_best_dynamic_collatz_powercap_8_nodes.json"
 
+rnn_raw_path = \
+    "/home/macierz/s184297/parallel-processing-cpu-and-gpu-env-and-lib-with-powercap/" \
+    "WYKRESY_MAGISTERKA/FINAL_DYNAMIC/test_rnn_8_nodes.json"
+rnn_equal_path = \
+    "/home/macierz/s184297/parallel-processing-cpu-and-gpu-env-and-lib-with-powercap/" \
+    "WYKRESY_MAGISTERKA/FINAL_DYNAMIC/equal_rnn_powercap_8_nodes.json"
+rnn_trajectories_path = \
+    "/home/macierz/s184297/parallel-processing-cpu-and-gpu-env-and-lib-with-powercap/" \
+    "WYKRESY_MAGISTERKA/FINAL_DYNAMIC/trajectories_best_dynamic_rnn_powercap_8_nodes.json"
+
+
 exp_twinprime_raw = ExperimentResult.from_file(twinprime_raw_path)
 twinprime_defaults = exp_twinprime_raw.default_metrics()
 exp_twinprime_equal = ExperimentResult.from_file(twinprime_equal_path).normalize(twinprime_defaults)
@@ -105,6 +146,12 @@ exp_collatz_raw = ExperimentResult.from_file(collatz_raw_path)
 collatz_defaults = exp_collatz_raw.default_metrics()
 exp_collatz_equal = ExperimentResult.from_file(collatz_equal_path).normalize(collatz_defaults)
 exp_collatz_trajectories = ExperimentResult.from_file(collatz_trajectories_path).normalize(collatz_defaults)
+
+exp_rnn_raw = ExperimentResult.from_file(rnn_raw_path)
+rnn_defaults = exp_rnn_raw.default_metrics()
+exp_rnn_equal = ExperimentResult.from_file(rnn_equal_path).normalize(rnn_defaults)
+exp_rnn_trajectories = ExperimentResult.from_file(rnn_trajectories_path).normalize(rnn_defaults)
+
 
 
 '''
@@ -176,4 +223,10 @@ dynamic_trajectories_plot (
     exp_collatz_equal,
     exp_collatz_trajectories,
     out_dir="../WYKRESY_MAGISTERKA/FINAL_DYNAMIC/collatz_dynamic_best",
+)
+
+dynamic_trajectories_plot (
+    exp_rnn_equal,
+    exp_rnn_trajectories,
+    out_dir="../WYKRESY_MAGISTERKA/FINAL_DYNAMIC/rnn_dynamic_best",
 )

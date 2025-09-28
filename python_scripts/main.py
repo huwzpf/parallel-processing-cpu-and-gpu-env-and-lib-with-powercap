@@ -6,47 +6,7 @@ from models import RunParameters, Experiment, ExperimentResult, MultipleRunResul
 from charts import time_powercap_scatter, time_batch_size_scatter, time_number_of_nodes_bar, time_number_of_nodes_scatter, min_powercap_heatmap_cpu_gpu, print_avg_edp_energy_per_configuration, min_powercap_heatmap_gpu, equal_split_start_powercap_plot, min_powercap_heatmap_cpu
 from experiments import run_experiment
 
-# For RNN: NUMBER_OF_RUNS = 5
-NUMBER_OF_RUNS = 3
-
-'''
-# Hand-picked configurations providing the lowest observed EDP for dynamic powercap experiments
-BEST_DYNAMIC_CONFIGS = {
-    "twinprime": [
-        {"strategy": "EDP_GRADIENT_CMAES", "start_powercap": 0.2, "edp_optimization_steps": 16, "gradient_opt_eps": 0.2},
-        {"strategy": "EDP_GRADIENT_CMAES", "start_powercap": 0.5, "edp_optimization_steps": 0, "gradient_opt_eps": 0.1},
-        {"strategy": "EDP_GRADIENT_CMAES", "start_powercap": 0.8, "edp_optimization_steps": 16, "gradient_opt_eps": 0.1},
-        {"strategy": "EDP_GRADIENT_SIMPLE", "start_powercap": 0.2, "edp_optimization_steps": 8, "start_alpha": 0.1, "gradient_opt_eps": 0.1, "epsilon_decay": 0.9, "alpha_decay": 0.9},
-        {"strategy": "EDP_GRADIENT_SIMPLE", "start_powercap": 0.5, "edp_optimization_steps": 8, "start_alpha": 0.1, "gradient_opt_eps": 0.2, "epsilon_decay": 0.98, "alpha_decay": 0.9},
-        {"strategy": "EDP_GRADIENT_SIMPLE", "start_powercap": 0.8, "edp_optimization_steps": 0, "start_alpha": 0.1, "gradient_opt_eps": 0.2, "epsilon_decay": 0.9, "alpha_decay": 0.98},
-        {"strategy": "EDP_GRADIENT_SPSA", "start_powercap": 0.2, "edp_optimization_steps": 35, "start_alpha": 0.4, "gradient_opt_eps": 0.1, "epsilon_decay": 0.98, "alpha_decay": 0.95},
-        {"strategy": "EDP_GRADIENT_SPSA", "start_powercap": 0.5, "edp_optimization_steps": 35, "start_alpha": 0.4, "gradient_opt_eps": 0.2, "epsilon_decay": 0.95, "alpha_decay": 0.98},
-        {"strategy": "EDP_GRADIENT_SPSA", "start_powercap": 0.8, "edp_optimization_steps": 0, "start_alpha": 0.1, "gradient_opt_eps": 0.2, "epsilon_decay": 0.95, "alpha_decay": 0.98},
-    ],
-    "montecarlo": [
-        {"strategy": "EDP_GRADIENT_CMAES", "start_powercap": 0.2, "edp_optimization_steps": 16, "gradient_opt_eps": 0.2},
-        {"strategy": "EDP_GRADIENT_CMAES", "start_powercap": 0.5, "edp_optimization_steps": 16, "gradient_opt_eps": 0.1},
-        {"strategy": "EDP_GRADIENT_CMAES", "start_powercap": 0.8, "edp_optimization_steps": 16, "gradient_opt_eps": 0.2},
-        {"strategy": "EDP_GRADIENT_SIMPLE", "start_powercap": 0.2, "edp_optimization_steps": 8, "start_alpha": 0.1, "gradient_opt_eps": 0.1, "epsilon_decay": 0.9, "alpha_decay": 0.9},
-        {"strategy": "EDP_GRADIENT_SIMPLE", "start_powercap": 0.5, "edp_optimization_steps": 0, "start_alpha": 0.4, "gradient_opt_eps": 0.1, "epsilon_decay": 0.9, "alpha_decay": 0.9},
-        {"strategy": "EDP_GRADIENT_SIMPLE", "start_powercap": 0.8, "edp_optimization_steps": 0, "start_alpha": 0.4, "gradient_opt_eps": 0.1, "epsilon_decay": 0.9, "alpha_decay": 0.9},
-        {"strategy": "EDP_GRADIENT_SPSA", "start_powercap": 0.2, "edp_optimization_steps": 0, "start_alpha": 0.2, "gradient_opt_eps": 0.1, "epsilon_decay": 0.98, "alpha_decay": 0.95},
-        {"strategy": "EDP_GRADIENT_SPSA", "start_powercap": 0.5, "edp_optimization_steps": 0, "start_alpha": 0.1, "gradient_opt_eps": 0.1, "epsilon_decay": 0.95, "alpha_decay": 0.95},
-        {"strategy": "EDP_GRADIENT_SPSA", "start_powercap": 0.8, "edp_optimization_steps": 35, "start_alpha": 0.2, "gradient_opt_eps": 0.2, "epsilon_decay": 0.95, "alpha_decay": 0.98},
-    ],
-    "cnn": [
-        {"strategy": "EDP_GRADIENT_CMAES", "start_powercap": 0.2, "edp_optimization_steps": 0, "gradient_opt_eps": 0.2},
-        {"strategy": "EDP_GRADIENT_CMAES", "start_powercap": 0.5, "edp_optimization_steps": 16, "gradient_opt_eps": 0.1},
-        {"strategy": "EDP_GRADIENT_CMAES", "start_powercap": 0.8, "edp_optimization_steps": 16, "gradient_opt_eps": 0.1},
-        {"strategy": "EDP_GRADIENT_SIMPLE", "start_powercap": 0.2, "edp_optimization_steps": 0, "start_alpha": 0.4, "gradient_opt_eps": 0.1, "epsilon_decay": 0.98, "alpha_decay": 0.98},
-        {"strategy": "EDP_GRADIENT_SIMPLE", "start_powercap": 0.5, "edp_optimization_steps": 0, "start_alpha": 0.1, "gradient_opt_eps": 0.1, "epsilon_decay": 0.98, "alpha_decay": 0.98},
-        {"strategy": "EDP_GRADIENT_SIMPLE", "start_powercap": 0.8, "edp_optimization_steps": 8, "start_alpha": 0.1, "gradient_opt_eps": 0.2, "epsilon_decay": 0.98, "alpha_decay": 0.98},
-        {"strategy": "EDP_GRADIENT_SPSA", "start_powercap": 0.2, "edp_optimization_steps": 50, "start_alpha": 0.2, "gradient_opt_eps": 0.2, "epsilon_decay": 0.95, "alpha_decay": 0.98},
-        {"strategy": "EDP_GRADIENT_SPSA", "start_powercap": 0.5, "edp_optimization_steps": 100, "start_alpha": 0.1, "gradient_opt_eps": 0.2, "epsilon_decay": 0.95, "alpha_decay": 0.95},
-        {"strategy": "EDP_GRADIENT_SPSA", "start_powercap": 0.8, "edp_optimization_steps": 50, "start_alpha": 0.1, "gradient_opt_eps": 0.1, "epsilon_decay": 0.98, "alpha_decay": 0.95},
-    ],
-}
-'''
+NUMBER_OF_RUNS = 5
 
 
 BEST_DYNAMIC_CONFIGS = {
@@ -95,15 +55,15 @@ BEST_DYNAMIC_CONFIGS = {
         {"strategy": "EDP_GRADIENT_SPSA", "start_powercap": 0.8, "edp_optimization_steps": 0, "start_alpha": 0.1, "gradient_opt_eps": 0.2, "epsilon_decay": 0.95, "alpha_decay": 0.98},
     ],
     "vecmaxdiv": [
-        {"strategy": "EDP_GRADIENT_CMAES", "start_powercap": 0.2, "edp_optimization_steps": 16, "gradient_opt_eps": 0.2},
-        {"strategy": "EDP_GRADIENT_CMAES", "start_powercap": 0.5, "edp_optimization_steps": 16, "gradient_opt_eps": 0.2},
-        {"strategy": "EDP_GRADIENT_CMAES", "start_powercap": 0.8, "edp_optimization_steps": 16, "gradient_opt_eps": 0.2},
-        {"strategy": "EDP_GRADIENT_SIMPLE", "start_powercap": 0.2, "edp_optimization_steps": 8, "start_alpha": 0.1, "gradient_opt_eps": 0.1, "epsilon_decay": 0.9, "alpha_decay": 0.9},
-        {"strategy": "EDP_GRADIENT_SIMPLE", "start_powercap": 0.5, "edp_optimization_steps": 8, "start_alpha": 0.1, "gradient_opt_eps": 0.1, "epsilon_decay": 0.9, "alpha_decay": 0.9},
-        {"strategy": "EDP_GRADIENT_SIMPLE", "start_powercap": 0.8, "edp_optimization_steps": 8, "start_alpha": 0.1, "gradient_opt_eps": 0.1, "epsilon_decay": 0.9, "alpha_decay": 0.9},
-        {"strategy": "EDP_GRADIENT_SPSA", "start_powercap": 0.2, "edp_optimization_steps": 0, "start_alpha": 0.2, "gradient_opt_eps": 0.1, "epsilon_decay": 0.98, "alpha_decay": 0.95},
-        {"strategy": "EDP_GRADIENT_SPSA", "start_powercap": 0.5, "edp_optimization_steps": 0, "start_alpha": 0.2, "gradient_opt_eps": 0.1, "epsilon_decay": 0.98, "alpha_decay": 0.95},
-        {"strategy": "EDP_GRADIENT_SPSA", "start_powercap": 0.8, "edp_optimization_steps": 0, "start_alpha": 0.2, "gradient_opt_eps": 0.1, "epsilon_decay": 0.98, "alpha_decay": 0.95},
+        {"strategy": "EDP_GRADIENT_CMAES", "start_powercap": 0.2, "edp_optimization_steps": 20, "gradient_opt_eps": 0.2},
+        {"strategy": "EDP_GRADIENT_CMAES", "start_powercap": 0.5, "edp_optimization_steps": 20, "gradient_opt_eps": 0.2},
+        {"strategy": "EDP_GRADIENT_CMAES", "start_powercap": 0.8, "edp_optimization_steps": 20, "gradient_opt_eps": 0.2},
+        {"strategy": "EDP_GRADIENT_SIMPLE", "start_powercap": 0.2, "edp_optimization_steps": 12, "start_alpha": 0.1, "gradient_opt_eps": 0.1, "epsilon_decay": 0.9, "alpha_decay": 0.9},
+        {"strategy": "EDP_GRADIENT_SIMPLE", "start_powercap": 0.5, "edp_optimization_steps": 12, "start_alpha": 0.1, "gradient_opt_eps": 0.1, "epsilon_decay": 0.9, "alpha_decay": 0.9},
+        {"strategy": "EDP_GRADIENT_SIMPLE", "start_powercap": 0.8, "edp_optimization_steps": 12, "start_alpha": 0.1, "gradient_opt_eps": 0.1, "epsilon_decay": 0.9, "alpha_decay": 0.9},
+        {"strategy": "EDP_GRADIENT_SPSA", "start_powercap": 0.2, "edp_optimization_steps": 50, "start_alpha": 0.2, "gradient_opt_eps": 0.1, "epsilon_decay": 0.98, "alpha_decay": 0.95},
+        {"strategy": "EDP_GRADIENT_SPSA", "start_powercap": 0.5, "edp_optimization_steps": 50, "start_alpha": 0.2, "gradient_opt_eps": 0.1, "epsilon_decay": 0.98, "alpha_decay": 0.95},
+        {"strategy": "EDP_GRADIENT_SPSA", "start_powercap": 0.8, "edp_optimization_steps": 50, "start_alpha": 0.2, "gradient_opt_eps": 0.1, "epsilon_decay": 0.98, "alpha_decay": 0.95},
     ],
     "rnn": [
         {"strategy": "EDP_GRADIENT_CMAES", "start_powercap": 0.2, "edp_optimization_steps": 16, "gradient_opt_eps": 0.1},
@@ -166,8 +126,7 @@ def experiment_time_powercap(description: str, app_name: str, file_path: str | o
                         # common_run_parameters(cpu_enabled=True, powercap=powercap),
                         common_run_parameters(cpu_enabled=cpu_enabled, powercap=powercap),
                     ]
-                # for powercap in [0, 500, 1000, 1500, 2000, 2500]
-                for powercap in [0]
+                for powercap in [0, 500, 1000, 1500, 2000, 2500]
                 ]
             )
         )
@@ -365,156 +324,9 @@ def experiment_time_batch_size(description: str, app_name: str, file_path: str |
 
 
 if __name__ == "__main__":
-    
-    # experiment_time_powercap(description="time(powercap)", app_name="collatz", file_path="collatz_powercap_16_nodes.json", number_od_nodes=16, batch_size=480000, cpu_power_scaling=0)
-    # experiment_time_powercap(description="time(powercap)", app_name="twinprime", file_path="twinprime_powercap_16_nodes.json", number_od_nodes=16, batch_size=480000, cpu_power_scaling=0)
-    # experiment_time_powercap(description="time(powercap)", app_name="vecmaxdiv", file_path="vecmaxdiv_powercap_16_nodes.json", number_od_nodes=16, batch_size=960000, cpu_power_scaling=0)
-
-    # experiment_time_powercap(description="time(powercap)", app_name="collatz", file_path="065-collatz_powercap_16_nodes.json", number_od_nodes=16, batch_size=480000, cpu_power_scaling=0.65)
-    # experiment_time_powercap(description="time(powercap)", app_name="twinprime", file_path="064-twinprime_powercap_16_nodes.json", number_od_nodes=16, batch_size=480000, cpu_power_scaling=0.64)
-    # experiment_time_powercap(description="time(powercap)", app_name="vecmaxdiv", file_path="056-vecmaxdiv_powercap_16_nodes.json", number_od_nodes=16, batch_size=960000, cpu_power_scaling=0.56)
-
-    # experiment_time_batch_size(description="time(batch_size)", app_name="collatz", file_path="collatz_batch_size_16_nodes.json", number_of_nodes=16)
-    # exp = ExperimentResult.from_file("../cudampilib/collatz_batch_size_16_nodes.json")
-    # time_batch_size_scatter(exp)
-
-
-    # experiment_powercap_opt(description="continous_powercap", app_name="montecarlo", file_path="continous_montecarlo_powercap_8_nodes.json", number_od_nodes=8, batch_size=480000, cpu_power_scaling=0, cpu_enabled=False)
-    # experiment_time_powercap(description="binary_powercap", app_name="montecarlo", file_path="binary_montecarlo_powercap_8_nodes.json", number_od_nodes=8, batch_size=480000, cpu_power_scaling=0, cpu_enabled=False)
-    # experiment_powercap_opt(description="continous_powercap", app_name="vecmaxdiv", file_path="continous_vecmaxdiv_powercap_8_nodes.json", number_od_nodes=8, batch_size=960000, cpu_power_scaling=0, cpu_enabled=False)
-    # experiment_time_powercap(description="binary_powercap", app_name="vecmaxdiv", file_path="binary_vecmaxdiv_powercap_8_nodes.json", number_od_nodes=8, batch_size=960000, cpu_power_scaling=0, cpu_enabled=False)
-    '''
-    print("---------- Montecarlo experiments ----------")
-    exp = ExperimentResult.from_file("../cudampilib/continous_montecarlo_powercap_8_nodes.json")
-    min_powercap_heatmap_gpu(exp, "8_plots_montecarlo")
-    exp = ExperimentResult.from_file("../cudampilib/binary_montecarlo_powercap_8_nodes.json")
-    print_avg_edp_energy_per_configuration(exp)
-    
-    print("---------- Vecmaxdiv experiments ----------")
-    exp = ExperimentResult.from_file("../cudampilib/continous_vecmaxdiv_powercap_8_nodes.json")
-    min_powercap_heatmap_gpu(exp, "8_plots_vecmaxdiv")
-    exp = ExperimentResult.from_file("../cudampilib/binary_vecmaxdiv_powercap_8_nodes.json")
-    print_avg_edp_energy_per_configuration(exp)
-
-    '''
-    
-    # experiment_powercap_opt(description="continous_powercap", app_name="collatz", file_path="continous_collatz_powercap_8_nodes.json", number_od_nodes=8, batch_size=480000, cpu_power_scaling=0, cpu_enabled=True)
-    # experiment_time_powercap(description="binary_powercap", app_name="collatz", file_path="binary_collatz_powercap_8_nodes.json", number_od_nodes=8, batch_size=480000, cpu_power_scaling=0, cpu_enabled=True)
-    # experiment_powercap_opt(description="continous_powercap", app_name="twinprime", file_path="continous_twinprime_powercap_8_nodes.json", number_od_nodes=8, batch_size=480000, cpu_power_scaling=0, cpu_enabled=True)
-    # experiment_time_powercap(description="binary_powercap", app_name="twinprime", file_path="binary_twinprime_powercap_8_nodes.json", number_od_nodes=8, batch_size=480000, cpu_power_scaling=0, cpu_enabled=True)
-
-    '''
-    print("---------- Collatz experiments ----------")
-    exp = ExperimentResult.from_file("../cudampilib/continous_collatz_powercap_8_nodes.json")
-    min_powercap_heatmap_cpu(exp, "8_plots_collatz")
-    exp = ExperimentResult.from_file("../cudampilib/binary_collatz_powercap_8_nodes.json")
-    print_avg_edp_energy_per_configuration(exp)
-    # 
-    print("---------- Twinprime experiments ----------")
-    exp = ExperimentResult.from_file("../cudampilib/continous_twinprime_powercap_8_nodes.json")
-    min_powercap_heatmap_cpu(exp, "8_plots_twinprime")
-    exp = ExperimentResult.from_file("../cudampilib/binary_twinprime_powercap_8_nodes.json")
-    print_avg_edp_energy_per_configuration(exp)
-
-    '''
-
-    # experiment_equal_split(description="equal_powercap", app_name="cnn", file_path="equal_cnn_powercap_8_nodes.json", number_od_nodes=8, batch_size=100, cpu_power_scaling=0, cpu_enabled=True)
-    # experiment_equal_split(description="equal_powercap", app_name="montecarlo", file_path="equal_montecarlo_powercap_8_nodes.json", number_od_nodes=8, batch_size=480000, cpu_power_scaling=0, cpu_enabled=False)
-    # experiment_equal_split(description="equal_powercap", app_name="vecmaxdiv", file_path="equal_vecmaxdiv_powercap_8_nodes.json", number_od_nodes=8, batch_size=960000, cpu_power_scaling=0, cpu_enabled=False)
-    # experiment_equal_split(description="equal_powercap", app_name="collatz", file_path="equal_collatz_powercap_8_nodes.json", number_od_nodes=8, batch_size=480000, cpu_power_scaling=0, cpu_enabled=True)
-    # experiment_equal_split(description="equal_powercap", app_name="twinprime", file_path="equal_twinprime_powercap_8_nodes.json", number_od_nodes=8, batch_size=480000, cpu_power_scaling=0, cpu_enabled=True)
-    # experiment_equal_split(description="equal_powercap", app_name="rnn", file_path="equal_rnn_powercap_8_nodes.json", number_od_nodes=8, batch_size=100, cpu_power_scaling=0, cpu_enabled=True)
-
-    # experiment_powercap_dynamic(description="dynamic_powercap", app_name="montecarlo", file_path="dynamic_montecarlo_powercap_8_nodes.json", number_od_nodes=8, batch_size=480000, cpu_power_scaling=0, cpu_enabled=False)
-    # experiment_powercap_dynamic(description="dynamic_powercap", app_name="twinprime", file_path="dynamic_twinprime_powercap_8_nodes.json", number_od_nodes=8, batch_size=480000, cpu_power_scaling=0, cpu_enabled=True)
-
-    # experiment_equal_split(description="equal_powercap", app_name="twinprime", file_path="equal_twinprime_powercap_8_nodes.json", number_od_nodes=8, batch_size=480000, cpu_power_scaling=0, cpu_enabled=True)
-    # experiment_best_dynamic(description="best_dynamic_powercap", app_name="montecarlo", file_path="best_dynamic_montecarlo_powercap_8_nodes.json", number_od_nodes=8, batch_size=480000, cpu_power_scaling=0, cpu_enabled=False)
-    # experiment_best_dynamic(description="best_dynamic_powercap", app_name="twinprime", file_path="best_dynamic_twinprime_powercap_8_nodes.json", number_od_nodes=8, batch_size=480000, cpu_power_scaling=0, cpu_enabled=True)
-    # experiment_best_dynamic(description="best_dynamic_powercap", app_name="cnn", file_path="best_dynamic_cnn_powercap_8_nodes.json", number_od_nodes=8, batch_size=20, cpu_power_scaling=0, cpu_enabled=True)
-
-    # experiment_best_dynamic(description="best_dynamic_powercap", app_name="montecarlo", file_path="trajectories_best_dynamic_montecarlo_powercap_8_nodes.json", number_od_nodes=8, batch_size=480000, cpu_power_scaling=0, cpu_enabled=False)
-    # experiment_best_dynamic(description="best_dynamic_powercap", app_name="twinprime", file_path="trajectories_best_dynamic_twinprime_powercap_8_nodes.json", number_od_nodes=8, batch_size=480000, cpu_power_scaling=0, cpu_enabled=True)
-    
-    # experiment_equal_split(description="equal_powercap", app_name="vecmaxdiv", file_path="trajectories_best_dynamic_vecmaxdiv_powercap_8_nodes.json", number_od_nodes=8, batch_size=480000, cpu_power_scaling=0, cpu_enabled=False)
-    # experiment_equal_split(description="equal_powercap", app_name="collatz", file_path="trajectories_best_dynamic_collatz_powercap_8_nodes.json", number_od_nodes=8, batch_size=480000, cpu_power_scaling=0, cpu_enabled=True)
-    # experiment_best_dynamic(description="best_dynamic_powercap", app_name="vecmaxdiv", file_path="equal_vecmaxdiv_powercap_8_nodes.json", number_od_nodes=8, batch_size=480000, cpu_power_scaling=0, cpu_enabled=False)
-    # experiment_best_dynamic(description="best_dynamic_powercap", app_name="collatz", file_path="equal_collatz_powercap_8_nodes.json", number_od_nodes=8, batch_size=480000, cpu_power_scaling=0, cpu_enabled=True)
-    
-    # experiment_best_dynamic(description="best_dynamic_powercap", app_name="cnn", file_path="trajectories_best_dynamic_cnn_powercap_8_nodes.json", number_od_nodes=8, batch_size=20, cpu_power_scaling=0, cpu_enabled=True)
-    experiment_time_powercap(description="test", app_name="vecmaxdiv", file_path="test_vecmaxdiv_powercap_8_nodes.json", number_od_nodes=8, batch_size=480000, cpu_power_scaling=0, cpu_enabled=False)
-    experiment_time_powercap(description="test", app_name="collatz", file_path="test_collatz_powercap_8_nodes.json", number_od_nodes=8, batch_size=480000, cpu_power_scaling=0, cpu_enabled=True)
-    experiment_time_powercap(description="test", app_name="rnn", file_path="test_cnn_rnn_8_nodes.json", number_od_nodes=8, batch_size=40, cpu_power_scaling=0, cpu_enabled=True)
-    
-    experiment_equal_split(description="equal_powercap", app_name="rnn", file_path="equal_rnn_powercap_8_nodes.json", number_od_nodes=8, batch_size=40, cpu_power_scaling=0, cpu_enabled=True)
-    experiment_best_dynamic(description="best_dynamic_powercap", app_name="rnn", file_path="trajectories_best_dynamic_rnn_powercap_8_nodes.json", number_od_nodes=8, batch_size=40, cpu_power_scaling=0, cpu_enabled=True)
-
-    # experiment_time_powercap(description="test", app_name="montecarlo", file_path="test_montecarlo_powercap_8_nodes.json", number_od_nodes=8, batch_size=480000, cpu_power_scaling=0, cpu_enabled=False)
-    # experiment_time_powercap(description="test", app_name="twinprime", file_path="test_twinprime_powercap_8_nodes.json", number_od_nodes=8, batch_size=480000, cpu_power_scaling=0, cpu_enabled=True)
-    # experiment_time_powercap(description="test", app_name="cnn", file_path="test_cnn_powercap_8_nodes.json", number_od_nodes=8, batch_size=20, cpu_power_scaling=0, cpu_enabled=True)
-    
-    
-    # experiment_equal_split(description="equal_powercap", app_name="montecarlo", file_path="equal_montecarlo_powercap_8_nodes.json", number_od_nodes=8, batch_size=480000, cpu_power_scaling=0, cpu_enabled=False)
-    
-
-    # experiment_powercap_dynamic(description="dynamic_powercap", app_name="cnn", file_path="dynamic_cnn_powercap_8_nodes.json", number_od_nodes=8, batch_size=20, cpu_power_scaling=0, cpu_enabled=True)
-    # experiment_equal_split(description="equal_powercap", app_name="cnn", file_path="equal_cnn_powercap_8_nodes.json", number_od_nodes=8, batch_size=20, cpu_power_scaling=0, cpu_enabled=True)
-    '''
+    experiment_equal_split(description="equal_powercap", app_name="cnn", file_path="equal_cnn_powercap_8_nodes.json", number_od_nodes=8, batch_size=100, cpu_power_scaling=0, cpu_enabled=True)
+    experiment_best_dynamic(description="best_dynamic_powercap", app_name="cnn", file_path="trajectories_best_dynamic_cnn_powercap_8_nodes.json", number_od_nodes=8, batch_size=20, cpu_power_scaling=0, cpu_enabled=True)
     experiment_powercap_opt(description="continous_powercap", app_name="cnn", file_path="continous_cnn_powercap_8_nodes.json", number_od_nodes=8, batch_size=100, cpu_power_scaling=0, cpu_enabled=True)
     experiment_time_powercap(description="binary_powercap", app_name="cnn", file_path="binary_cnn_powercap_8_nodes.json", number_od_nodes=8, batch_size=100, cpu_power_scaling=0, cpu_enabled=True)
-    exp = ExperimentResult.from_file("../cudampilib/continous_cnn_powercap_8_nodes.json")
-    min_powercap_heatmap_cpu_gpu(exp, "plots_cnn_final")
-    exp = ExperimentResult.from_file("../cudampilib/binary_cnn_powercap_8_nodes.json")
-    print_avg_edp_energy_per_configuration(exp)
-    '''
+
     
-    '''
-    experiment_powercap_opt(description="continous_powercap", app_name="rnn", file_path="continous_rnn_powercap_8_nodes.json", number_od_nodes=8, batch_size=100, cpu_power_scaling=0, cpu_enabled=True)
-    experiment_time_powercap(description="binary_powercap", app_name="rnn", file_path="binary_rnn_powercap_8_nodes.json", number_od_nodes=8, batch_size=100, cpu_power_scaling=0, cpu_enabled=True)
-    exp = ExperimentResult.from_file("../cudampilib/continous_rnn_powercap_8_nodes.json")
-    min_powercap_heatmap_cpu_gpu(exp, "plots_rnn_final")
-    exp = ExperimentResult.from_file("../cudampilib/binary_rnn_powercap_8_nodes.json")
-    print_avg_edp_energy_per_configuration(exp)
-    '''
-
-
-    '''
-    exp = ExperimentResult.from_file("../cudampilib/equal_cnn_powercap_8_nodes.json")
-    equal_split_start_powercap_plot(exp, "equal_plots_cnn", gpu_max_power=285, gpu_max_pc=285, cpu_max_pc=125)
-    exp = ExperimentResult.from_file("../cudampilib/equal_montecarlo_powercap_8_nodes.json")
-    equal_split_start_powercap_plot(exp, "equal_plots_montecarlo", gpu_max_power=285, gpu_max_pc=285, cpu_max_pc=0)
-    exp = ExperimentResult.from_file("../cudampilib/equal_vecmaxdiv_powercap_8_nodes.json")
-    equal_split_start_powercap_plot(exp, "equal_plots_vecmaxdiv", gpu_max_power=230, gpu_max_pc=285, cpu_max_pc=0)
-    exp = ExperimentResult.from_file("../cudampilib/equal_collatz_powercap_8_nodes.json")
-    equal_split_start_powercap_plot(exp, "equal_plots_collatz", gpu_max_power=100, gpu_max_pc=285, cpu_max_pc=125)
-    exp = ExperimentResult.from_file("../cudampilib/equal_twinprime_powercap_8_nodes.json")
-    equal_split_start_powercap_plot(exp, "equal_plots_twinprime", gpu_max_power=100, gpu_max_pc=285, cpu_max_pc=125)
-    exp = ExperimentResult.from_file("../cudampilib/equal_rnn_powercap_8_nodes.json")
-    equal_split_start_powercap_plot(exp, "equal_plots_rnn", gpu_max_power=170, gpu_max_pc=285, cpu_max_pc=125)
-    '''
-
-
-
-
-
-    # experiment_powercap_opt(description="time(powercap)", app_name="rnn", file_path="continous_rnn_powercap_8_nodes.json", number_od_nodes=8, batch_size=100, cpu_power_scaling=0)
-    # exp = ExperimentResult.from_file("../cudampilib/continous_rnn_powercap_8_nodes.json")
-    # min_powercap_heatmap_cpu_gpu(exp, "plots_rnn")
-    # experiment_time_powercap(description="time(powercap)", app_name="rnn", file_path="binary_rnn_powercap_8_nodes.json", number_od_nodes=8, batch_size=100, cpu_power_scaling=0)
-    # exp = ExperimentResult.from_file("../cudampilib/binary_rnn_powercap_8_nodes.json")
-    # print_avg_edp_energy_per_configuration(exp)
-    # experiment_time_nodes(description="time(number_of_nodes) and number of streams", app_name="collatz", file_path="collatz_time_nodes.json", batch_size=480000)
-    # exp = ExperimentResult.from_file("../cudampilib/collatz_time_nodes.json")
-    # time_number_of_nodes_bar(exp)
-    # experiment_time_powercap(description="time(powercap)", app_name="collatz", file_path="binary_collatz_powercap_8_nodes.json", number_od_nodes=8, batch_size=480000, cpu_power_scaling=0)
-    # experiment_powercap_opt(description="time(powercap)", app_name="collatz", file_path="continous_collatz_powercap_8_nodes.json", number_od_nodes=8, batch_size=480000, cpu_power_scaling=0)
-    # exp = ExperimentResult.from_file("/home/macierz/s184297/parallel-processing-cpu-and-gpu-env-and-lib-with-powercap/cudampilib/continous_collatz_powercap_8_nodes.json")
-    # min_powercap_heatmap_cpu_gpu(exp, "plots_new")
-    # exp = ExperimentResult.from_file("/home/macierz/s184297/parallel-processing-cpu-and-gpu-env-and-lib-with-powercap/cudampilib/binary_collatz_powercap_8_nodes.json")
-    # print_avg_edp_energy_per_configuration(exp)
-    # experiment_powercap_opt(description="time(powercap)", app_name="twinprime", file_path="33_continous_twinprime_powercap_8_nodes.json", number_od_nodes=8, batch_size=480000, cpu_power_scaling=0)
-    # exp = ExperimentResult.from_file("../cudampilib/33_continous_twinprime_powercap_8_nodes.json")
-    # time_powercap_scatter(exp) 
-    # experiment_powercap_opt(description="time(powercap)", app_name="vecmaxdiv", file_path="33_continous_vecmaxdiv_powercap_8_nodes.json", number_od_nodes=8, batch_size=960000, cpu_power_scaling=0)
-    # exp = ExperimentResult.from_file("../cudampilib/33_continous_vecmaxdiv_powercap_8_nodes.json")
-    # time_powercap_scatter(exp) 

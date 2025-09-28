@@ -1608,7 +1608,7 @@ def dynamic_search_trajectories_plot(
         ax.legend(fontsize=8, loc='best')
 
         plt.tight_layout()
-        out_path = Path(out_dir) / f"{app_name}_dynamic_search_{nodes_label}_{suffix}.png"
+        out_path = Path(out_dir) / f"{app_name}_{suffix}.png"
         plt.savefig(out_path, dpi=800)
         plt.close(fig)
 
@@ -1708,6 +1708,12 @@ def dynamic_trajectories_plot(
     baseline_powercaps = sorted(baseline_edp.keys())
     has_baseline = bool(baseline_powercaps)
 
+    equal_best_edp = float("nan")
+    if has_baseline:
+        baseline_vals = [value for value in baseline_edp.values() if not np.isnan(value)]
+        if baseline_vals:
+            equal_best_edp = float(np.min(baseline_vals))
+
     app_name = getattr(equal_split_results.experiment_result[0].parameters, "app_name", "app")
     try:
         nodes_set = {
@@ -1799,20 +1805,32 @@ def dynamic_trajectories_plot(
             else:
                 avg_improvement = float("nan")
 
-            edps = [
+            edp_values = [
                 entry.get("edp")
                 for entry in candidate_entries
                 if entry.get("edp") is not None and not np.isnan(entry["edp"])
             ]
-            if not edps:
+            if not edp_values:
                 continue
-            avg_edp = float(np.mean(edps))
+            avg_edp = float(np.mean(edp_values))
+            best_edp = float(np.min(edp_values))
+
+            best_improvement = float("nan")
+            if (
+                has_baseline
+                and not np.isnan(equal_best_edp)
+                and not np.isnan(best_edp)
+                and equal_best_edp != 0
+            ):
+                best_improvement = (equal_best_edp - best_edp) / equal_best_edp
 
             candidate = {
                 "param_label": param_label,
                 "entries": candidate_entries,
                 "avg_improvement": avg_improvement,
                 "avg_edp": avg_edp,
+                "best_edp": best_edp,
+                "best_improvement": best_improvement,
             }
 
             if best_info is None:
@@ -1846,6 +1864,8 @@ def dynamic_trajectories_plot(
                     "entries": sorted(entries, key=lambda item: item["start_powercap"]),
                     "avg_improvement": float("nan"),
                     "avg_edp": avg_edp,
+                    "best_edp": float(np.min(edps)) if edps else float("nan"),
+                    "best_improvement": float("nan"),
                 }
                 break
 
@@ -1863,19 +1883,27 @@ def dynamic_trajectories_plot(
 
     if best_per_strategy:
         print(f"[dynamic_best] {app_name} ({nodes_label}) best configs vs equal split:")
+        if not np.isnan(equal_best_edp):
+            print(f"  Equal Split best EDP={equal_best_edp:.4f}")
         for strategy, info in sorted(best_per_strategy.items()):
             friendly_name = label_mapping.get(strategy, nice_strategy(strategy))
             param_label = info["param_label"]
-            avg_improvement = info["avg_improvement"]
-            avg_edp = info["avg_edp"]
+            avg_improvement = info.get("avg_improvement", float("nan"))
+            avg_edp = info.get("avg_edp", float("nan"))
+            best_edp = info.get("best_edp", float("nan"))
+            best_improvement = info.get("best_improvement", float("nan"))
+
+            parts = [f"  {friendly_name}: {param_label}"]
+            if not np.isnan(avg_edp):
+                parts.append(f"avg EDP={avg_edp:.4f}")
             if not np.isnan(avg_improvement):
-                print(
-                    f"  {friendly_name}: {param_label} | avg EDP={avg_edp:.4f}, avg ΔEDP={avg_improvement:.4f}"
-                )
-            else:
-                print(
-                    f"  {friendly_name}: {param_label} | avg EDP={avg_edp:.4f}"
-                )
+                parts.append(f"avg dEDP={100 * avg_improvement:.2f}%")
+            if not np.isnan(best_edp):
+                parts.append(f"best EDP={best_edp:.4f}")
+            if not np.isnan(best_improvement):
+                parts.append(f"best dEDP={100 * best_improvement:.2f}%")
+
+            print(" | ".join(parts))
 
     cmap = plt.get_cmap('tab10')
     base_palette = {
@@ -1897,6 +1925,13 @@ def dynamic_trajectories_plot(
         for entry in info["entries"]
     }
 
+    annotation_positions = [
+        (6, -4, 'left', 'top'),
+        (-6, -4, 'right', 'top'),
+        (0, 6, 'center', 'bottom'),
+        (0, -6, 'center', 'top'),
+    ]
+
     for metric_key, ylabel, suffix, metric_title, std_key in metrics:
         ys = [row[metric_key] for row in equal_rows]
         y_errs = []
@@ -1907,6 +1942,31 @@ def dynamic_trajectories_plot(
             else:
                 y_errs.append(float(std_val))
         fig, ax = plt.subplots(figsize=(7, 4))
+
+        annotation_index = 0
+
+        def annotate_point(x: float, y: float, text: str, color: str) -> None:
+            nonlocal annotation_index
+            dx, dy, ha, va = annotation_positions[annotation_index % len(annotation_positions)]
+            annotation_index += 1
+            ax.annotate(
+                text,
+                (x, y),
+                textcoords="offset points",
+                xytext=(dx, dy),
+                ha=ha,
+                va=va,
+                fontsize=8,
+                color=color,
+                bbox={
+                    "boxstyle": "round,pad=0.25",
+                    "fc": "white",
+                    "ec": color,
+                    "lw": 0.9,
+                    "alpha": 0.85,
+                },
+                zorder=8,
+            )
 
         ax.errorbar(
             xs,
@@ -1931,17 +1991,11 @@ def dynamic_trajectories_plot(
                 baseline_best_x = x_val
                 baseline_best_y = y_val
         if baseline_best_x is not None and baseline_best_y is not None:
-            label_text = fmt_value(baseline_best_y)
-            ax.annotate(
-                label_text,
-                (baseline_best_x, baseline_best_y),
-                textcoords="offset points",
-                xytext=(0, 8),
-                ha='center',
-                va='bottom',
-                fontsize=8,
-                color='black',
-                bbox={"boxstyle": "round,pad=0.2", "fc": "white", "alpha": 0.6, "ec": "none"},
+            annotate_point(
+                baseline_best_x,
+                baseline_best_y,
+                fmt_value(baseline_best_y),
+                'black',
             )
 
         for strategy in strategy_list:
@@ -1995,18 +2049,7 @@ def dynamic_trajectories_plot(
                     best_x = x_val
                     best_y = y_val
             if best_x is not None and best_y is not None:
-                label_text = fmt_value(best_y)
-                ax.annotate(
-                    label_text,
-                    (best_x, best_y),
-                    textcoords="offset points",
-                    xytext=(0, 8),
-                    ha='center',
-                    va='bottom',
-                    fontsize=8,
-                    color=color,
-                    bbox={"boxstyle": "round,pad=0.2", "fc": "white", "alpha": 0.6, "ec": "none"},
-                )
+                annotate_point(best_x, best_y, fmt_value(best_y), color)
 
         tick_positions = sorted({*xs, *best_powercaps})
         ax.set_xticks(tick_positions)
@@ -2024,6 +2067,6 @@ def dynamic_trajectories_plot(
         ax.legend(fontsize=8, loc='best')
 
         plt.tight_layout()
-        out_path = Path(out_dir) / f"{app_name}_dynamic_search_{nodes_label}_{suffix}.png"
+        out_path = Path(out_dir) / f"{app_name}_{suffix}.png"
         plt.savefig(out_path, dpi=800)
         plt.close(fig)

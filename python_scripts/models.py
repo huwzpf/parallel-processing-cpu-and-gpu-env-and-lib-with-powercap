@@ -263,9 +263,9 @@ class ExperimentResult:
                 raw_value = payload.get(field.name, MISSING)
                 if raw_value is MISSING or raw_value is None:
                     replacement = default_for_field(field)
-                    print(
-                        f"[ExperimentResult.from_file] Missing value for {context_path}.{field.name}; defaulting to {repr(replacement)}"
-                    )
+                    # print(
+                    #   f"[ExperimentResult.from_file] Missing value for {context_path}.{field.name}; defaulting to {repr(replacement)}"
+                    # )
                 else:
                     replacement = raw_value
 

@@ -75,6 +75,7 @@ mpicc -fopenmp -c $APPS_DIR/$VECMAXDIV_DIR/cpukernelvecmaxdiv.c -Iinclude -o $BU
 mpicc -fopenmp -c $APPS_DIR/$PATTERNSEARCH_DIR/cpukernelpatternsearch.c -Iinclude -o $BUILD_DIR/cpukernelpatternsearch.o
 mpicc -fopenmp -c $APPS_DIR/$TWINPRIME_DIR/cpukerneltwinprime.c  -Iinclude -lpthread -lm -o $BUILD_DIR/cpukerneltwinprime.o 
 mpicc -fopenmp -c $APPS_DIR/$CNN_DIR/cpukernelcnn.c -Iinclude -o $BUILD_DIR/cpukernelcnn.o
+mpicc -fopenmp -c $APPS_DIR/$RNN_DIR/cpukernelrnn.c -Iinclude -I/opt/intel/oneapi/mkl/latest/include -o $BUILD_DIR/cpukernelrnn.o
 mpicc -fopenmp -O3 -march=native -ffast-math -funroll-loops -c $APPS_DIR/$MONTECARLO_DIR/cpukernelmontecarlo.c -Iinclude -o $BUILD_DIR/cpukernelmontecarlo.o
 
 #mpicc -fopenmp -o $BUILD_DIR/cudampislave cudampislave.c $BUILD_DIR/appkernel.o $BUILD_DIR/cudampicommon.o -I/usr/local/cuda-13.0/targets/x86_64-linux/include -Iinclude -L/usr/local/cuda-13.0/targets/x86_64-linux/lib -lcudart -lstdc++
