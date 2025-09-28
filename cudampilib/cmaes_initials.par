@@ -1,0 +1,20 @@
+# CMA-ES initials file for powercap optimization
+# Only optional settings are provided here to avoid overriding
+# the dimension and initial mean/stddev that we set in code.
+
+## --- OPTIONAL SETTINGS (stopping and runtime)
+
+# Termination thresholds (tune as needed)
+stopFitness 1e-9 
+stopMaxFunEvals   1e299
+stopMaxIter       25
+stopTolFun        1
+stopTolFunHist    1
+stopTolX          1e-11
+stopTolUpXFactor  1e3
+
+seed 0
+
+maxTimeFractionForEigendecompostion 1
+
+

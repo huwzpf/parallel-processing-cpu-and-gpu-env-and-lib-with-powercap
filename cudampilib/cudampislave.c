@@ -22,6 +22,8 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OU
 #define CPU_STREAM_FOR_GPU_RESPONSES CPU_STREAMS_SUPPORTED + omp_get_thread_num()
 // 4 GB per GPU seems reasonable
 #define INITIAL_GPU_BUFFER_SIZE 4 * 1024 * 1024 * 1024UL
+// CPU time window (microseconds) will be received from master at init
+unsigned long long __cudampi__cpu_time_window_us = 1000000ULL; // default 1s
 
 #define ENABLE_LOGGING
 #define MPI_LOGGING
@@ -38,12 +40,14 @@ int debugTaskCounter = 0;
 int *__cudampi_targetMPIrankfordevice; // MPI rank for device number (global)
 int *__cudampi__GPUcountspernode;
 int *__cudampi__freeThreadsPerNode;
+perNodePowerCapRange_t* __cudampi__perNodePowerCapRange;
 
 MPI_Comm *__cudampi__communicators;
 
 int __cudampi__totaldevicecount = 0; // how many GPUs in total (on all considered nodes)
 int __cudampi__localGpuDeviceCount = 1;
 int __cudampi__localFreeThreadCount = 0;
+perNodePowerCapRange_t __cudampi__localPowerCapRange;
 
 int __cudampi__cpu_enabled;
 float __cudampi__cpu_power_scaling;
@@ -511,6 +515,13 @@ int main(int argc, char **argv) {
     exit(-1); // we could exit in a nicer way! TBD
   }
 
+  // initialize nvml
+  nvmlReturn_t nvmlResult = nvmlInit();
+  if (nvmlResult != NVML_SUCCESS) {
+      log_message(LOG_ERROR, "nvmlInit failed: %s\n", nvmlErrorString(nvmlResult));
+      return -1;
+  }
+
   MPI_Bcast(&__cudampi__cpu_enabled, 1, MPI_INT, 0, MPI_COMM_WORLD);
   MPI_Bcast(&__cudampi__cpu_power_scaling, 1, MPI_FLOAT, 0, MPI_COMM_WORLD);
 
@@ -526,9 +537,24 @@ int main(int argc, char **argv) {
     __cudampi__localFreeThreadCount = 0;
   }
 
+  __cudampi__perNodePowerCapRange = (perNodePowerCapRange_t *)malloc(sizeof(perNodePowerCapRange_t) * __cudampi__MPIproccount);
+  if (!__cudampi__perNodePowerCapRange) {
+    log_message(LOG_ERROR,"\nNot enough memory");
+    exit(-1); // we could exit in a nicer way! TBD
+  }
+  __cudampi__localPowerCapRange.cpuRange = __cudampi__getCpuPowerCapRange();
+  for (int i = 0; i < __cudampi__localGpuDeviceCount; i++) {
+    __cudampi__localPowerCapRange.gpuRange[i] = __cudampi__getGpuPowerCapRange(i);
+  }
+
   MPI_Allgather(&__cudampi__localGpuDeviceCount, 1, MPI_INT, __cudampi__GPUcountspernode, 1, MPI_INT, MPI_COMM_WORLD);
 
   MPI_Allgather(&__cudampi__localFreeThreadCount, 1, MPI_INT, __cudampi__freeThreadsPerNode, 1, MPI_INT, MPI_COMM_WORLD);
+  
+  // Receive CPU power cap time window (microseconds) from master
+  MPI_Bcast(&__cudampi__cpu_time_window_us, 1, MPI_UNSIGNED_LONG_LONG, 0, MPI_COMM_WORLD);
+
+  MPI_Allgather(&__cudampi__localPowerCapRange, sizeof(perNodePowerCapRange_t), MPI_BYTE, __cudampi__perNodePowerCapRange, sizeof(perNodePowerCapRange_t), MPI_BYTE, MPI_COMM_WORLD);
 
   MPI_Bcast(&__cudampi__totaldevicecount, 1, MPI_INT, 0, MPI_COMM_WORLD);
 
@@ -589,13 +615,6 @@ int main(int argc, char **argv) {
     }
   }
 
-  // initialize nvml
-  nvmlReturn_t nvmlResult = nvmlInit();
-  if (nvmlResult != NVML_SUCCESS) {
-      log_message(LOG_ERROR, "nvmlInit failed: %s\n", nvmlErrorString(nvmlResult));
-      return -1;
-  }
-  
   assert(numberOfThreads < MAX_THREADS);
 
   #pragma omp parallel num_threads(numberOfThreads)
@@ -611,6 +630,13 @@ int main(int argc, char **argv) {
 
         MPI_Probe(0, MPI_ANY_TAG, __cudampi__communicators[omp_get_thread_num()], &status);
 
+        if (status.MPI_TAG == __cudampi__CONFIGUREPOWERCAP) {
+          float powerCap;
+          MPI_Recv(&powerCap, 1, MPI_FLOAT, 0, __cudampi__CONFIGUREPOWERCAP, __cudampi__communicators[omp_get_thread_num()], &status);
+          
+          // For now it should be ok to configure for GPU corresponding to the thread number, not one set with cudaSetDevice
+          __cudampi__setGpuPowerCap(omp_get_thread_num(), powerCap);
+        }
         if (status.MPI_TAG == __cudampi__CUDAMPIMALLOCREQ) {
           unsigned long rdata;
 
@@ -918,6 +944,12 @@ int main(int argc, char **argv) {
       do {
         MPI_Probe(0, MPI_ANY_TAG, __cudampi__communicators[omp_get_thread_num()], &status);
 
+        if (status.MPI_TAG == __cudampi__CONFIGUREPOWERCAP) {
+          float powerCap;
+          MPI_Recv(&powerCap, 1, MPI_FLOAT, 0, __cudampi__CONFIGUREPOWERCAP, __cudampi__communicators[omp_get_thread_num()], &status);
+
+          __cudampi__setCpuPowerCap(powerCap, __cudampi__cpu_time_window_us);
+        }
         if (status.MPI_TAG == __cudampi__CPUMALLOCREQ) {
           unsigned long rdata;
 
@@ -1186,6 +1218,13 @@ int main(int argc, char **argv) {
       log_message(LOG_DEBUG, "Terminated task handling thread!");
       omp_destroy_lock(&task_available_locks[stream]);
     }
+  }
+  
+  // Reset CPU power cap
+  __cudampi__setCpuPowerCap(__cudampi__localPowerCapRange.cpuRange.defaultPowerCap, __cudampi__localPowerCapRange.cpuRange.defaultTimeWindowUs);
+  // Reset GPU power caps
+  for (int i = 0; i < __cudampi__localGpuDeviceCount; i++) {
+    __cudampi__setGpuPowerCap(i, __cudampi__localPowerCapRange.gpuRange[i].defaultPowerCap);
   }
 
   nvmlShutdown();
