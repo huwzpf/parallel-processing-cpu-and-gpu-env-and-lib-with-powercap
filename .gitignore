@@ -6,3 +6,6 @@
 *.png
 /python_scripts/__pycache__/
 /python_scripts/venv/
+actparcmaes.par
+cudampilib/hostfile
+cudampilib/temp_hostfile

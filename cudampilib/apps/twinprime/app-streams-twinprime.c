@@ -24,6 +24,9 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OU
 #define ENABLE_OUTPUT_LOGS
 #include "utility.h"
 
+// Replay the logical dataset multiple times without allocating extra host memory.
+#define ITERS 50
+
 struct __cudampi__arguments_type __cudampi__arguments;
 
 long long VECTORSIZE;
@@ -83,7 +86,11 @@ int main(int argc, char **argv)
 
   gettimeofday(&start, NULL);
 
-  #pragma omp parallel num_threads(alldevicescount)
+  // Measure average period between __cudampi__deviceSynchronize() calls in the main loop
+  long long total_sync_intervals = 0;      // aggregated across threads
+  long long total_sync_sum_us = 0;         // aggregated across threads (microseconds)
+
+  #pragma omp parallel num_threads(alldevicescount) reduction(+:total_sync_intervals,total_sync_sum_us)
   {
 
     __cudampi__batch_pointer batch_pointer;
@@ -156,30 +163,42 @@ int main(int argc, char **argv)
       __cudampi__memcpyAsync(devPtr2, &devVector2, sizeof(void *), cudaMemcpyHostToDevice, stream2);
       __cudampi__memcpyAsync(devPtr2 + sizeof(void *), &devResults2, sizeof(void *), cudaMemcpyHostToDevice, stream2);
     }
+    // Local trackers for sync call periods (per-thread)
+    struct timeval last_sync_time;
+    int has_last_sync_time = 0;
+    long long local_sync_intervals = 0;
+    long long local_sync_sum_us = 0;
+
     do 
     {
-      batch_pointer = __cudampi__getnextchunkindex(&globalcounter, VECTORSIZE);
+      batch_pointer = __cudampi__getnextchunkindex(&globalcounter, ITERS * VECTORSIZE);
 
-      if (batch_pointer.start >= VECTORSIZE) 
+      if (batch_pointer.start >= ITERS * VECTORSIZE) 
       {
         finish = 1;
       } 
       else 
       {
+        // "Simulate" larger memory size by counting all the way to ITERS * VECTORSIZE (while only VECTORSIZE will fit into RAM)
+        // (VECTORSIZE - batchsize) is largest value that batch_pointer.start can safely take (as n_elements <= batchsize)
+        batch_pointer.start = batch_pointer.start % (VECTORSIZE - batchsize);
         __cudampi__memcpyAsync(devVector, vector + batch_pointer.start, batch_pointer.n_elements * sizeof(long long), cudaMemcpyHostToDevice, stream);
         __cudampi__kernelInStream(devPtr, stream, 0);
         __cudampi__memcpyAsync(results + batch_pointer.start, devResults, batch_pointer.n_elements * sizeof(long long), cudaMemcpyDeviceToHost, stream);
 
         if(streamcount == 2) 
         {
-          batch_pointer = __cudampi__getnextchunkindex(&globalcounter, VECTORSIZE);
+          batch_pointer = __cudampi__getnextchunkindex(&globalcounter, ITERS * VECTORSIZE);
 
-          if (batch_pointer.start >= VECTORSIZE) 
+          if (batch_pointer.start >= ITERS * VECTORSIZE) 
           {
             finish = 1;
           } 
           else 
           {
+            // "Simulate" larger memory size by counting all the way to ITERS * VECTORSIZE (while only VECTORSIZE will fit into RAM)
+            // (VECTORSIZE - batchsize) is largest value that batch_pointer.start can safely take (as n_elements <= batchsize)
+            batch_pointer.start = batch_pointer.start % (VECTORSIZE - batchsize);
             __cudampi__memcpyAsync(devVector2, vector + batch_pointer.start, batch_pointer.n_elements * sizeof(long long), cudaMemcpyHostToDevice, stream2);
             __cudampi__kernelInStream(devPtr2, stream2, 0);
             __cudampi__memcpyAsync(results + batch_pointer.start, devResults2, batch_pointer.n_elements * sizeof(long long), cudaMemcpyDeviceToHost, stream2);
@@ -188,11 +207,28 @@ int main(int argc, char **argv)
       }
 
       privatecounter++;
-      if (privatecounter % 2) 
+      if (privatecounter % 8 == 0) 
       {
         __cudampi__deviceSynchronize();
+
+        // Record period between consecutive deviceSynchronize() calls inside the main loop
+        struct timeval now_sync;
+        gettimeofday(&now_sync, NULL);
+        if (has_last_sync_time)
+        {
+          long long delta_us = (now_sync.tv_sec - last_sync_time.tv_sec) * 1000000LL +
+                               (now_sync.tv_usec - last_sync_time.tv_usec);
+          local_sync_sum_us += delta_us;
+          local_sync_intervals += 1;
+        }
+        last_sync_time = now_sync;
+        has_last_sync_time = 1;
       }
     } while (!finish);
+
+    // Contribute local stats to the reduction totals
+    total_sync_intervals += local_sync_intervals;
+    total_sync_sum_us += local_sync_sum_us;
 
     __cudampi__streamDestroy(stream);
 
@@ -210,6 +246,17 @@ int main(int argc, char **argv)
   }
   gettimeofday(&stop, NULL);
   log_message(LOG_INFO, "Main elapsed time=%f\n", (double)((stop.tv_sec - start.tv_sec) + (double)(stop.tv_usec - start.tv_usec) / 1000000.0));
+
+  if (total_sync_intervals > 0)
+  {
+    double avg_us = (double) total_sync_sum_us / (double) total_sync_intervals;
+    log_message(LOG_INFO, "Average period between deviceSynchronize() calls: %.3f ms over %lld intervals\n",
+                avg_us / 1000.0, total_sync_intervals);
+  }
+  else
+  {
+    log_message(LOG_INFO, "No deviceSynchronize() pairs observed inside main loop.\n");
+  }
 
   __cudampi__terminateMPI();
   // save_vector_output_char(vectorc, VECTORSIZE, "patternsearch_logs_cpugpuasyncfull.log", "CPUGPUASYNC");

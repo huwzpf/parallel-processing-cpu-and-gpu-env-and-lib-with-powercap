@@ -25,81 +25,21 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OU
 
 #include "cudampicommon.h"
 #include "cudampilib.h"
+#include "cudampi_state.h"
+#include "powercap_config.h"
+#include "powercap.h"
 
 // int __cudampi__GPUcountpernode=1;
 
-#define __cudampi__currentDevice  __cudampi__currentdevice[omp_get_thread_num()]
-#define __cudampi__currentCommunicator  __cudampi__communicators[__cudampi__currentDevice]
-#define  __cudampi_isLocalGpu __cudampi__currentDevice < __cudampi__GPUcountspernode[0]
-#define __cudampi__currentMemcpyQueue &(__cudampi__memcpy_queues[omp_get_thread_num()])
+#define __cudampi__currentMemcpyQueue &(__cudampi__memcpy_queues[__cudampi__currentDevice])
 
-int *__cudampi__GPUcountspernode;
-int *__cudampi__CPUcountspernode;
-int *__cudampi__freeThreadsPerNode;
-int __cudampi_totaldevicecount = 0; // how many GPUs + CPUs (on all considered nodes)
-int __cudampi_totalgpudevicecount = 0; // how many GPUs in total (on all considered nodes)
-int __cudampi_totalcpudevicecount = 0; // how many CPUs in total (on all considered nodes)
-
-int __cudampi__localGpuDeviceCount = 0; // how many GPUs in process 0
-int __cudampi__localFreeThreadCount = 0;
-
-int *__cudampi_targetGPUfordevice;     // GPU id on a given node for device number (global)
-int *__cudampi_targetMPIrankfordevice; // MPI rank for device number (global)
-
-int __cudampi__MPIinitialized = 0;
-int __cudampi__MPIproccount;
-int __cudampi__myrank;
-
-double __cudampi__totalEnergyUsed = 0;
-int __cudampi__dyanmicCpuBatchSizeScalingEnabled;
-
-double __cudampi__firstIterTotalGpuBatchTimeSeconds = 0;
-double __cudampi__firstIterTotalCpuBatchTimeSeconds = 0;
-unsigned long __cudampi__firstIterTotalGpuBatches = 0;
-unsigned long __cudampi__firstIterTotalCpuBatches = 0;
-int __cudampi__firstIterNumberGpuDevicesMeasured = 0;
-int __cudampi__firstIterNumberCpuDevicesMeasured = 0;
-int __cudampi__firstIterDeviceMeasurementStarted[__CUDAMPI_MAX_THREAD_COUNT] = {0};
-int __cudampi__firstIterMeasuredForDevice[__CUDAMPI_MAX_THREAD_COUNT] = {0};
-int __cudampi__cpuBatchSizeScalingDone = 0;
+// shared state moved to cudampi_state.c
 
 float cpuLastEnergyMeasured[MAX_THREADS] = {0.0};
 omp_lock_t cpuEnergyLock[MAX_THREADS];
 int isInitialCpuEnergyMeasured[MAX_THREADS] = {0};
 
-int __cudampi__currentdevice[__CUDAMPI_MAX_THREAD_COUNT]; // current device id for various threads in process 0
-
-struct timeval __cudampi__timestart[__CUDAMPI_MAX_THREAD_COUNT]; // start of time measurement
-struct timeval __cudampi__timestop[__CUDAMPI_MAX_THREAD_COUNT];  // end of time measurement
-double __cudampi__time_us[__CUDAMPI_MAX_THREAD_COUNT];      // last time measurement (from start to stop)
-int __cudampi__timemeasured[__CUDAMPI_MAX_THREAD_COUNT] = {0};   // whether time measurement started
-float __cudampi__devicepower[__CUDAMPI_MAX_THREAD_COUNT];        // current power taken by a device
-
-int __cudampi__deviceenabled[__CUDAMPI_MAX_THREAD_COUNT]; // whether the given device is enabled for further use
-
-omp_lock_t __cudampi__devicelocks[__CUDAMPI_MAX_THREAD_COUNT]; // locks that guard writing to and reading from power and time values for particular devices
-
-omp_lock_t deviceselectionlock;
-
-int __cudampi__amimanager[__CUDAMPI_MAX_THREAD_COUNT] = {0}; // whether the given thread/device is the manager for device selection
-
-MPI_Comm *__cudampi__communicators; // communicators for communication with threads responsible for target GPUs, there is one communicator for such target GPU
-
-int __cudampi__isglobalpowerlimitset = 0; // whether a global power limit has been set
-float __cudampi__globalpowerlimit;
-
 int powermeasurecounter[__CUDAMPI_MAX_THREAD_COUNT] = {0};
-
-unsigned long __cudampi__batches_sent[__CUDAMPI_MAX_THREAD_COUNT] = {0};
-unsigned long long __cudampi__data_points_sent[__CUDAMPI_MAX_THREAD_COUNT] = {0};
-unsigned long __cudampi__last_batches_sent[__CUDAMPI_MAX_THREAD_COUNT] = {0};
-unsigned long long __cudampi__last_data_points_sent[__CUDAMPI_MAX_THREAD_COUNT] = {0};
-
-unsigned long __cudampi__default_batch_size;
-unsigned long __cudampi__cpu_batch_size;
-float __cudampi__cpu_power_scaling;
-
-int __cudampi__cpu_enabled;
 extern struct __cudampi__arguments_type __cudampi__arguments;
 
 static char doc[] = "Cudampi program";
@@ -108,7 +48,6 @@ static struct argp_option options[] = {
   { "cpu-enabled",                       'c',  "ENABLED",           0, "Enable CPU processing (1 to enable, 0 to disable)" },
   { "number-of-streams",                 'n',  "NUM",               0, "Set the number of streams" },
   { "batch-size",                        'b',  "SIZE",              0, "Set the batch size" },
-  { "powercap",                          'p',  "WATTS",             0, "Set the power cap (0 to disable)" },
   { "cpu-power-scaling",                 's',  "SCALING FACTOR",    0, "Set the CPU power scaling factor" },
   { "initial-cpu-batch-size-scaling",    'f',  "SCALING FACTOR",    0, "Set initial scaling factor for CPU batch size (0 to disable)" },
   { "disable-dynamic-cpu-batch-scaling",  0,    0,                  0, "Disable dynamic CPU batch size scaling" },
@@ -153,6 +92,16 @@ unsigned long __cudampi__getCurrentBatchSize() {
 // Start measurement of first iteration (between first kernel call and first synchronize call) performance for each device
 // This function starts measurement when first kernel is called and increments amount of processed data with each kernel call
 void __cudampi__recordBatchSizeForDeviceStats(unsigned long batchsize) {
+  // Record application start time on first-ever invocation (globally)
+  if (!__cudampi__appStartTimestampSet) {
+    #pragma omp critical
+    {
+      if (!__cudampi__appStartTimestampSet) {
+        gettimeofday(&__cudampi__appStartTime, NULL);
+        __cudampi__appStartTimestampSet = 1;
+      }
+    }
+  }
   if (!__cudampi__dyanmicCpuBatchSizeScalingEnabled) {
     return;
   }
@@ -296,9 +245,6 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state)
     case 'b':
       arguments->batch_size = atol(arg);
       break;
-    case 'p':
-      arguments->powercap = atoi(arg);
-      break;
     case 's':
       arguments->cpu_power_scaling = atof(arg);
       break;
@@ -307,6 +253,12 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state)
       break;
     case 0: // For --disable-dynamic-cpu-batch-scaling
       arguments->use_dynamic_scaling = 0;
+      break;
+    case 'x':
+      arguments->cpu_min_powercap = atof(arg);
+      break;
+    case 'y':
+      arguments->gpu_min_powercap = atof(arg);
       break;
     default:
       return ARGP_ERR_UNKNOWN;
@@ -385,190 +337,7 @@ void process_queue() {
 }
 
 void __cudampi__setglobalpowerlimit(float powerlimit) {
-
-  __cudampi__isglobalpowerlimitset = 1;
   __cudampi__globalpowerlimit = powerlimit;
-}
-
-
-float __cudampi__gettotalpowerofselecteddevices() { // gets total power of currently enabled devices
-  int i;
-  float power = 0;
-  float curpower;
-
-  omp_set_lock(&deviceselectionlock);
-
-  for (i = 0; i < __cudampi_totaldevicecount; i++) {
-    omp_set_lock(&(__cudampi__devicelocks[__cudampi__currentdevice[i]]));
-  }
-
-  for (i = 0; i < __cudampi_totaldevicecount; i++) {
-    if (__cudampi__deviceenabled[__cudampi__currentdevice[i]] == 1) {
-      curpower = __cudampi__devicepower[__cudampi__currentdevice[i]];
-      if (curpower == (-1)) {
-
-        for (int i = 0; i < __cudampi_totaldevicecount; i++) {
-          omp_unset_lock(&(__cudampi__devicelocks[__cudampi__currentdevice[i]]));
-        }
-
-        omp_unset_lock(&deviceselectionlock);
-        return -1;
-      }
-      power += curpower;
-    }
-  }
-
-  for (i = 0; i < __cudampi_totaldevicecount; i++) {
-    omp_unset_lock(&(__cudampi__devicelocks[__cudampi__currentdevice[i]]));
-  }
-
-  omp_unset_lock(&deviceselectionlock);
-  return power;
-}
-
-int __cudampi__selectdevicesforpowerlimit_greedy() { // adopts a greedy strategy for selecting devices
-                                                     // returns 1 if successful, 0 otherwise - if not all devices have been recorder power
-  int i;
-  float powerleft;
-  int indexselected;
-  float curperfpower;
-  int anydeviceenabled = 0;
-
-  log_message(LOG_DEBUG, "\nBefore setting power cap");
-  fflush(stdout);
-
-  omp_set_lock(&deviceselectionlock);
-
-  if (__cudampi__isglobalpowerlimitset == 0) {
-    log_message(LOG_DEBUG,"\nPowercap has not been set");
-    fflush(stdout);
-    omp_unset_lock(&deviceselectionlock);
-    return 0;
-  }
-
-  powerleft = __cudampi__globalpowerlimit;
-  // this will be invoked from one thread typically
-  fflush(stdout);
-  for (i = 0; i < __cudampi_totaldevicecount; i++) {
-    log_message(LOG_DEBUG,"\nSetting lock on %d %d", i, __cudampi__currentdevice[i]);
-    fflush(stdout);
-    omp_set_lock(&(__cudampi__devicelocks[__cudampi__currentdevice[i]]));
-    // disable all devices at first
-  }
-  fflush(stdout);
-
-  // check of all the devices has been set power
-  int allpowerset = 1;
-  for (i = 0; i < __cudampi_totaldevicecount; i++) {
-    if (__cudampi__devicepower[__cudampi__currentdevice[i]] == (-1)) {
-      allpowerset = 0;
-      break;
-    }
-  }
-
-  if (!allpowerset) {
-    // unlock and quit
-    log_message(LOG_DEBUG,"Before setting powercap");
-    fflush(stdout);
-    for (i = 0; i < __cudampi_totaldevicecount; i++) {
-      omp_unset_lock(&(__cudampi__devicelocks[__cudampi__currentdevice[i]]));
-    }
-    log_message(LOG_DEBUG,"After setting powercap");
-    fflush(stdout);
-
-    omp_unset_lock(&deviceselectionlock);
-
-    return 0;
-  }
-
-  for (i = 0; i < __cudampi_totaldevicecount; i++) {
-    if (__cudampi__deviceenabled[__cudampi__currentdevice[i]] == 1) {
-      __cudampi__deviceenabled[__cudampi__currentdevice[i]] = -1; // candidate for selection
-    }
-    __cudampi__amimanager[__cudampi__currentdevice[i]] = 0;
-  }
-
-  fflush(stdout);
-  int managerselected = 0;
-  do {
-    curperfpower = 0;
-    indexselected = -1;
-    for (i = 0; i < __cudampi_totaldevicecount; i++) {
-      
-      float inverseDeviceEnergyUsed = computeDevPerformance(__cudampi__time_us[i]) / __cudampi__devicepower[i];
-      if (((-1) == (__cudampi__deviceenabled[__cudampi__currentdevice[i]])) && (__cudampi__devicepower[__cudampi__currentdevice[i]] <= powerleft) &&
-          (inverseDeviceEnergyUsed > curperfpower)) {
-        curperfpower = inverseDeviceEnergyUsed;
-        indexselected = i;
-        anydeviceenabled = 1;
-      }
-    }
-    if (indexselected != (-1)) {
-      // enable the found device now
-      __cudampi__deviceenabled[__cudampi__currentdevice[indexselected]] = 1;
-      if (!managerselected) {
-        managerselected = 1;
-        __cudampi__amimanager[__cudampi__currentdevice[indexselected]] = 1;
-      }
-
-      // Log if the selected device is CPU or GPU and how much power it subtracts
-      if (__cudampi__currentdevice[indexselected] >= __cudampi_totalgpudevicecount) {
-        if(__cudampi__devicepower[__cudampi__currentdevice[indexselected]] <= 0)
-        {
-          log_message(LOG_ERROR,"Selected CPU device %d is not correctly calculated", __cudampi__currentdevice[indexselected]);
-        }
-        log_message(LOG_INFO, "Selected CPU device %d, subtracted power: %f, inverse device energy used: %f", __cudampi__currentdevice[indexselected], __cudampi__devicepower[__cudampi__currentdevice[indexselected]], curperfpower);
-      } else {
-        log_message(LOG_INFO, "Selected GPU device %d, subtracted power: %f, inverse device energy used: %f", __cudampi__currentdevice[indexselected], __cudampi__devicepower[__cudampi__currentdevice[indexselected]], curperfpower);
-      }
-
-      // Log devices that were not selected and their power
-      for (int j = 0; j < __cudampi_totaldevicecount; j++) {
-        if (__cudampi__deviceenabled[__cudampi__currentdevice[j]] != 1) {
-          float inverseDeviceEnergyUsed = computeDevPerformance(__cudampi__time_us[j]) / __cudampi__devicepower[j];
-          if (__cudampi__currentdevice[j] >= __cudampi_totalgpudevicecount) {
-        log_message(LOG_INFO, "Not selected CPU device %d, power: %f, inverse device energy used: %f", __cudampi__currentdevice[j], __cudampi__devicepower[__cudampi__currentdevice[j]], inverseDeviceEnergyUsed);
-          } else {
-        log_message(LOG_INFO, "Not selected GPU device %d, power: %f, inverse device energy used: %f", __cudampi__currentdevice[j], __cudampi__devicepower[__cudampi__currentdevice[j]], inverseDeviceEnergyUsed);
-          }
-        }
-      }
-
-
-      powerleft -= __cudampi__devicepower[__cudampi__currentdevice[indexselected]];
-      log_message(LOG_DEBUG,"\nSelected device %d", __cudampi__currentdevice[indexselected]);
-      log_message(LOG_INFO, "Remaining power left: %f", powerleft);
-    }
-  } while (indexselected != (-1));
-  fflush(stdout);
-
-  if (!anydeviceenabled) { // handle this case
-    log_message(LOG_ERROR,"No devices found under the power limit");
-    fflush(stdout);
-    exit(-1);
-  }
-
-  // now not enabled devices are set to 0
-  for (i = 0; i < __cudampi_totaldevicecount; i++) {
-    if (__cudampi__deviceenabled[__cudampi__currentdevice[i]] != 1) {
-      __cudampi__deviceenabled[__cudampi__currentdevice[i]] = 0;
-    }
-  }
-
-   if (powerleft > 0) {
-    log_message(LOG_INFO, "All devices are selected and there is still power left: %f", powerleft);
-  }
-
-  // unlock the devices' locks
-  for (i = 0; i < __cudampi_totaldevicecount; i++) {
-    omp_unset_lock(&(__cudampi__devicelocks[__cudampi__currentdevice[i]]));
-  }
-
-  fflush(stdout);
-
-  omp_unset_lock(&deviceselectionlock);
-
-  return 1;
 }
 
 __cudampi__batch_pointer __cudampi__getnextchunkindex(long long *globalcounter, long long max) { 
@@ -582,7 +351,7 @@ __cudampi__batch_pointer __cudampi__getnextchunkindex_enableddevices(long long *
   int deviceenabled;
 
   omp_set_lock(&(__cudampi__devicelocks[__cudampi__currentDevice]));
-  deviceenabled = __cudampi__deviceenabled[__cudampi__currentDevice];
+  deviceenabled = __cudampi__devicePowerConfig[__cudampi__currentDevice].deviceEnabled;
   omp_unset_lock(&(__cudampi__devicelocks[__cudampi__currentDevice]));
 
   if (deviceenabled == 1)
@@ -599,8 +368,8 @@ __cudampi__batch_pointer __cudampi__getnextchunkindex_enableddevices(long long *
     if (batch_pointer.start < max)
     {
       batch_pointer.n_elements = (((batch_pointer.start + batchsize) > max )? max - batch_pointer.start : batchsize);
-      __cudampi__batches_sent[omp_get_thread_num()] += 1;
-      __cudampi__data_points_sent[omp_get_thread_num()] += batchsize;
+      __cudampi__batches_sent[__cudampi__currentDevice] += 1;
+      __cudampi__data_points_sent[__cudampi__currentDevice] += batchsize;
     }
   }
 
@@ -624,8 +393,8 @@ __cudampi__batch_pointer __cudampi__getnextchunkindex_alldevices(long long *glob
     if (batch_pointer.start < max)
     {
       batch_pointer.n_elements = (((batch_pointer.start + batchsize) > max )? max - batch_pointer.start : batchsize);
-      __cudampi__batches_sent[omp_get_thread_num()] += 1;
-      __cudampi__data_points_sent[omp_get_thread_num()] += batchsize;
+      __cudampi__batches_sent[__cudampi__currentDevice] += 1;
+      __cudampi__data_points_sent[__cudampi__currentDevice] += batchsize;
     }
 
   return batch_pointer;
@@ -635,7 +404,7 @@ int __cudampi__isdeviceenabled(int deviceid) {
   int val;
 
   #pragma omp atomic read
-  val = __cudampi__deviceenabled[__cudampi__currentDevice];
+  val = __cudampi__devicePowerConfig[__cudampi__currentDevice].deviceEnabled;
 
   return val;
 }
@@ -674,7 +443,6 @@ void __cudampi__initializeMPI(int argc, char **argv) {
   __cudampi__arguments.cpu_enabled = 1;
   __cudampi__arguments.number_of_streams = 1;
   __cudampi__arguments.batch_size = 0;
-  __cudampi__arguments.powercap = 0;
   __cudampi__arguments.cpu_power_scaling = 0.0;
   __cudampi__arguments.cpu_batch_scaling_factor = 0;
   __cudampi__arguments.use_dynamic_scaling = 1;
@@ -691,7 +459,6 @@ void __cudampi__initializeMPI(int argc, char **argv) {
   log_message(LOG_INFO, "CPU Enabled                                : %d",   __cudampi__arguments.cpu_enabled);
   log_message(LOG_INFO, "Number of Streams                          : %d",   __cudampi__arguments.number_of_streams);
   log_message(LOG_INFO, "Batch Size                                 : %d",   __cudampi__arguments.batch_size);
-  log_message(LOG_INFO, "Power Cap                                  : %d",   __cudampi__arguments.powercap);
   log_message(LOG_INFO, "CPU Power Scaling                          : %f",   __cudampi__arguments.cpu_power_scaling);
   log_message(LOG_INFO, "Initial Cpu Batch Size Scaling Factor      : %d",   __cudampi__arguments.cpu_batch_scaling_factor);
   log_message(LOG_INFO, "Dynamic CPU Batch Size Scaling Enabled     : %d",   __cudampi__arguments.use_dynamic_scaling);
@@ -701,10 +468,10 @@ void __cudampi__initializeMPI(int argc, char **argv) {
   __cudampi__default_batch_size = __cudampi__arguments.batch_size;
 
   __cudampi__cpu_power_scaling = __cudampi__arguments.cpu_power_scaling;
-  
+  __cudampi__loadAndLogPowercapConfig();
+
   if (__cudampi__cpu_enabled == 0)
   {
-    log_message(LOG_INFO, "Cpu disabled. Setting CPU power scaling to 0.0");
     __cudampi__cpu_power_scaling = 0.0;
   } else if (__cudampi__cpu_power_scaling < 0.01 || __cudampi__cpu_power_scaling >= 1.0)
   {
@@ -731,10 +498,7 @@ void __cudampi__initializeMPI(int argc, char **argv) {
       exit(-1);
   }
 
-  if (__cudampi__arguments.powercap > 0) {
-    log_message(LOG_INFO, "\nSetting power limit=%d\n", __cudampi__arguments.powercap);
-    __cudampi__setglobalpowerlimit(__cudampi__arguments.powercap);
-  }
+  // Powercap may be set via config; CLI fallback handled inside loader
 
   // fetch information about the rank and number of processes
 
@@ -755,8 +519,6 @@ void __cudampi__initializeMPI(int argc, char **argv) {
     exit(-1); // we could exit in a nicer way! TBD
   }
 
-  // initialize the array -- for simplicity first try to use all available GPUs in all nodes -- query the nodes
-
   // each process first checks its own device count
   if (cudaSuccess != cudaGetDeviceCount(&__cudampi__localGpuDeviceCount)) {
     log_message(LOG_ERROR,"Error invoking cudaGetDeviceCount()");
@@ -775,6 +537,9 @@ void __cudampi__initializeMPI(int argc, char **argv) {
   __cudampi__localFreeThreadCount = 0;
 
   MPI_Allgather(&__cudampi__localFreeThreadCount, 1, MPI_INT, __cudampi__freeThreadsPerNode, 1, MPI_INT, MPI_COMM_WORLD);
+
+  // Gather powercap ranges (includes broadcasting CPU time window)
+  __cudampi__allocAndGatherPowercapRanges();
 
   // check if there is a configuration file
   FILE *filep = fopen("__cudampi.conf", "r");
@@ -826,9 +591,6 @@ void __cudampi__initializeMPI(int argc, char **argv) {
     __cudampi_targetGPUfordevice[i] = currentGPU;
     __cudampi_targetMPIrankfordevice[i] = currentrank;
 
-    __cudampi__devicepower[i] = -1; // initial value
-    __cudampi__deviceenabled[i] = 1;
-
     currentGPU++;
 
     if (currentGPU == __cudampi__GPUcountspernode[currentrank]) {
@@ -840,23 +602,26 @@ void __cudampi__initializeMPI(int argc, char **argv) {
 
   currentrank = 0;
   for (i = __cudampi_totalgpudevicecount; i < __cudampi_totaldevicecount; i++) {
-    __cudampi_targetGPUfordevice[i] = -1;
-    __cudampi__devicepower[i] = -1; // initial value
-    __cudampi__deviceenabled[i] = 1;
     while (__cudampi__freeThreadsPerNode[currentrank] <= 0)
     {
       // skip all nodes with no free threads;
       currentrank ++;
     }
+    __cudampi_targetGPUfordevice[i] = -1;
+
     __cudampi_targetMPIrankfordevice[i] = currentrank;
     currentrank ++;
   }
-  // initialize current device id to 0 although various threads are expected to have various GPU ids
+
+  // Initialize powercap state per device and apply initial caps according to strategy
+  __cudampi__initDevicePowercapConfig();
+  __cudampi__applyInitialPowercapsForStrategy();
+
 
   for (int i = 0; i < __CUDAMPI_MAX_THREAD_COUNT; i++) {
+    // initialize current device id to 0 although various threads are expected to have various device ids
     __cudampi__currentdevice[i] = 0;
-
-    // initialize locks as well
+    // initialize locks
     omp_init_lock(&(__cudampi__devicelocks[i]));
   }
 
@@ -889,6 +654,9 @@ void __cudampi__initializeMPI(int argc, char **argv) {
 
     MPI_Comm_create(MPI_COMM_WORLD, tempgroup, &(__cudampi__communicators[i]));
   }
+
+  // apply changes to all powercaps
+  __cudampi__applyAllPowercaps();
 
   for (int i = 0; i < __cudampi_totaldevicecount; i++ ) {
     TAILQ_INIT(&(__cudampi__memcpy_queues[i]));
@@ -925,11 +693,55 @@ void __cudampi__terminateMPI() {
     MPI_Send(NULL, 0, MPI_CHAR, 1, __cudampi__CUDAMPIFINALIZE, __cudampi__communicators[i]);
   }
 
+  __cudampi__resetLocalPowercaps();
+
   nvmlShutdown();
 
-  log_message(LOG_WARN, "Terminating CUDAMPILIB, Total energy used %lf J", __cudampi__totalEnergyUsed);
+  log_message(LOG_ERROR, "Terminating CUDAMPILIB, Total energy used %lf J", __cudampi__totalEnergyUsed);
 
-  
+  // If dynamic optimisation was enabled, print exploration/exploitation phase stats
+  if (__cudampi__powercapStrategy == EDP_GRADIENT_SIMPLE ||
+      __cudampi__powercapStrategy == EDP_GRADIENT_SPSA ||
+      __cudampi__powercapStrategy == EDP_GRADIENT_SIMPLE_ADAPTIVE ||
+      __cudampi__powercapStrategy == EDP_GRADIENT_CMAES) {
+    // Total datapoints (sum over devices)
+    unsigned long long totalDataPoints = 0ULL;
+    for (int i = 0; i < __cudampi_totaldevicecount; i++) {
+      totalDataPoints += __cudampi__data_points_sent[i];
+    }
+    // Total time since first measurement
+    struct timeval now;
+    gettimeofday(&now, NULL);
+    double totalTimeSec = 0.0;
+    if (__cudampi__appStartTimestampSet) {
+      totalTimeSec = (double)(now.tv_sec - __cudampi__appStartTime.tv_sec)
+                   + (double)(now.tv_usec - __cudampi__appStartTime.tv_usec) / 1000000.0;
+    }
+    double totalEnergyJ = __cudampi__totalEnergyUsed;
+
+    // Exploration phase = from start until optimisation finished (if finished)
+    double explTime = __cudampi__optimizationFinished ? __cudampi__optimizationFinishedTime : totalTimeSec;
+    double explEnergy = __cudampi__optimizationFinished ? __cudampi__optimizationFinishedEnergy : totalEnergyJ;
+    unsigned long long explDP = __cudampi__optimizationFinished ?  __cudampi__optimizationFinishedDataPoints /__cudampi__default_batch_size : totalDataPoints /__cudampi__default_batch_size;
+    double explEDP = explEnergy * explTime;
+    double explEDPperDP2 = (explDP > 0ULL) ? (explEDP / ((double)explDP * (double)explDP)) : 0.0;
+
+    // Exploitation phase = remainder after exploration
+    double exploTime = totalTimeSec - explTime; if (exploTime < 0.0) exploTime = 0.0;
+    double exploEnergy = totalEnergyJ - explEnergy; if (exploEnergy < 0.0) exploEnergy = 0.0;
+    unsigned long long exploDP = (totalDataPoints > explDP) ? ((totalDataPoints - explDP) / __cudampi__default_batch_size) : 0ULL;
+    double exploEDP = exploEnergy * exploTime;
+    double exploEDPperDP2 = (exploDP > 0ULL) ? (exploEDP / ((double)exploDP * (double)exploDP)) : 0.0;
+
+    log_message(LOG_INFO, "[Dynamic Opt] Exploration: time=%.3fs, energy=%.3fJ, EDP=%.3f J*s, EDP/B^2=%.12f J*s/pt^2",
+                explTime, explEnergy, explEDP, explEDPperDP2);
+    log_message(LOG_INFO, "[Dynamic Opt] Exploitation: time=%.3fs, energy=%.3fJ, EDP=%.3f J*s, EDP/B^2=%.12f J*s/pt^2",
+                exploTime, exploEnergy, exploEDP, exploEDPperDP2);
+  }
+
+  // Cleanup CMA-ES resources if used
+  __cudampi__cmaesCleanup();
+
   for (int i = 0; i < MAX_THREADS; i++) {
     omp_destroy_lock(&cpuEnergyLock[i]);
   }
@@ -1007,7 +819,6 @@ cudaError_t __cudampi__malloc(void **devPtr, size_t size) {
   return __cudampi__cudaMalloc(devPtr, size);
 }
 
-
 cudaError_t __cudampi__cudaFree(void *devPtr) {
   // as for cudaMalloc but just free
 
@@ -1064,49 +875,24 @@ cudaError_t __cudampi__cudaDeviceSynchronize(void)
 cudaError_t __cudampi__deviceSynchronize(void) {
 
   cudaError_t retVal;
-  static int selecteddevices = 0; // only updated by thread 0
-  int amimanager;                 // if the current thread is manager for device selection
   float energy = -1, power = -1;
 
-  // if ((powermeasurecounter[omp_get_thread_num()]%10)==4) {
-
-  omp_set_lock(&(__cudampi__devicelocks[__cudampi__currentDevice]));
-  amimanager = __cudampi__amimanager[__cudampi__currentDevice];
-  omp_unset_lock(&(__cudampi__devicelocks[__cudampi__currentDevice]));
-
-  if (amimanager) {
-    if (__cudampi__isglobalpowerlimitset) {
-      if (!selecteddevices) {
-        selecteddevices = __cudampi__selectdevicesforpowerlimit_greedy();
-      } else {
-
-        // adjust if needed
-        float power;
-        power = __cudampi__gettotalpowerofselecteddevices();
-        if (power != (-1)) {
-          if (power > __cudampi__globalpowerlimit) {
-            log_message(LOG_DEBUG,"\ntotal power=%f limit=%f, adjusting", power, __cudampi__globalpowerlimit);
-            fflush(stdout);
-            __cudampi__selectdevicesforpowerlimit_greedy();
-          }
-        }
-      }
-    }
-  }
+  // Handle power-capping decisions (manager thread only)
+  __cudampi__powercappingManagerStep();
 
   if (__cudampi_isLocalGpu) { // run GPU synchronization locally
 
     // now get power measurement - this should be OK as we assume that computations might be taking place
-    if (1) {
-      cudaError_t error = cudaErrorUnknown;
-      error = getCpuEnergyUsed(&cpuLastEnergyMeasured[omp_get_thread_num()], &energy);
-      energy /= __cudampi__localGpuDeviceCount;
-      if (error != cudaSuccess) {
-        energy = -1;
-      }
-      power = getGPUpower(__cudampi__currentDevice);
-      log_message(LOG_DEBUG, "Got local GPU power %f and CPU energy for this GPU %f", power, energy);
+
+    cudaError_t error = cudaErrorUnknown;
+    error = getCpuEnergyUsed(&cpuLastEnergyMeasured[__cudampi__currentDevice], &energy);
+    energy /= __cudampi__localGpuDeviceCount;
+    if (error != cudaSuccess) {
+      energy = -1;
     }
+    power = getGPUpower(__cudampi__currentDevice);
+    log_message(LOG_DEBUG, "Got local GPU power %f and CPU energy for this GPU %f", power, energy);
+
 
     retVal = cudaDeviceSynchronize();
   } else { // run synchronization remotely
@@ -1151,7 +937,7 @@ cudaError_t __cudampi__deviceSynchronize(void) {
     retVal = ((cudaError_t)rdata);
   }
 
-  powermeasurecounter[omp_get_thread_num()]++;
+  powermeasurecounter[__cudampi__currentDevice]++;
 
   // record time
   if (__cudampi__timemeasured[__cudampi__currentDevice]) {
@@ -1182,6 +968,12 @@ cudaError_t __cudampi__deviceSynchronize(void) {
 
     log_message(LOG_DEBUG, "Scaling factor for power capping = %lf", scaling_factor);
 
+    // Save per-device time per data point based on actual work done this period
+    // Use unscaled time_in_seconds divided by data_points_sent; guard against zero.
+    if (data_points_sent > 0ULL) {
+      __cudampi__timePerDataPoint[__cudampi__currentDevice] = time_in_seconds / (double)data_points_sent;
+    }
+
     // Divide time by scaling factor (which is smaller than 1) which means that
     // if batch size for that device was scaled down, time it would take to process full batch of data is calculated
     __cudampi__time_us[__cudampi__currentDevice] /= scaling_factor;
@@ -1190,13 +982,18 @@ cudaError_t __cudampi__deviceSynchronize(void) {
     if (__cudampi__isCpu() && (energy != -1)){
       power = energy / time_in_seconds;
     }
-
-    if (!__cudampi__isCpu() && (energy != -1)) {
-      power += (energy / time_in_seconds);
-    }
+    // TODO: Consider if this should be uncommented
+    // if (!__cudampi__isCpu() && (energy != -1)) {
+    //  power += (energy / time_in_seconds);
+    // }
 
     if (power != (-1)) {
-      __cudampi__devicepower[__cudampi__currentDevice] = power;
+      __cudampi__devicePowerConfig[__cudampi__currentDevice].currentPower = power;
+
+      if (__cudampi__devicePowerConfig[__cudampi__currentDevice].currentPower > __cudampi__devicePowerConfig[__cudampi__currentDevice].currentPowerCap) {
+        // Make sure there are no noisy readings above the cap
+        __cudampi__devicePowerConfig[__cudampi__currentDevice].currentPower = __cudampi__devicePowerConfig[__cudampi__currentDevice].currentPowerCap;
+      }
       
       log_message(LOG_DEBUG, "Got power %f with time in seconds = %f", power, time_in_seconds);
       #pragma omp atomic
@@ -1246,6 +1043,12 @@ int __cudampi__isCpu()
 {
   // TODO ?
   return __cudampi__currentDevice  >= __cudampi_totalgpudevicecount;
+}
+
+
+int __cudampi__isDeviceCpu(int i)
+{
+  return __cudampi__currentdevice[i]  >= __cudampi_totalgpudevicecount;
 }
 
 cudaError_t __cudampi__setDevice(int device) {

@@ -10,6 +10,7 @@ THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR I
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 */
 #include "cudampicommon.h"
+#include <sys/time.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -20,6 +21,11 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OU
 #define ENABLE_LOGGING
 #define MPI_LOGGING
 #include "logger.h"
+
+#include <unistd.h>
+#include <sys/socket.h>
+#include <sys/un.h>
+#define SOCKET_PATH "/tmp/gpu_power_tool.sock"
 
 float computeDevPerformance(double period_us) {
   // period is just the time between two events so compute performance as an inverse
@@ -35,17 +41,257 @@ float getGPUpower(int gpuid) {
 
     result = nvmlDeviceGetHandleByIndex(gpuid, &nvmlDevice);
     if (result != NVML_SUCCESS) {
-        log_message(LOG_ERROR, "nvmlDeviceGetHandleByIndex failed: %s\n", nvmlErrorString(result));
+        log_message(LOG_ERROR, "nvmlDeviceGetHandleByIndex failed: %s", nvmlErrorString(result));
         return -1;
     }
 
     result = nvmlDeviceGetPowerUsage(nvmlDevice, &power_mw);
     if (result != NVML_SUCCESS) {
-        log_message(LOG_ERROR, "Failed to get power usage: %s\n", nvmlErrorString(result));
+        log_message(LOG_ERROR, "Failed to get power usage: %s", nvmlErrorString(result));
         return -1;
     }
 
     return (float)power_mw / 1000.0;
+}
+
+powercapRange_t __cudampi__getCpuPowerCapRange()
+{
+  powercapRange_t range;
+  FILE *file;
+  unsigned long long min, max;
+  unsigned long long powerCap_uw;
+  unsigned long long timeWindow_us;
+
+  range.min = 0; // For now assume that the minimum power cap is 0 as min_power_uw is not available
+
+  file = fopen("/sys/class/powercap/intel-rapl:0/constraint_0_max_power_uw", "r");
+  if (file == NULL) {
+      log_message(LOG_ERROR, "Failed to open max_power_uw file");
+      range.max = -1;
+      range.defaultPowerCap = -1;
+      return range;
+  }
+
+  if (fscanf(file, "%llu", &max) != 1) {
+      log_message(LOG_ERROR, "Failed to read max_power_uw value");
+      fclose(file);
+      range.max = -1;
+      range.defaultPowerCap = -1;
+      return range;
+  }
+
+  fclose(file);
+
+  range.max = (float)max / 1e6;
+  file = fopen("/sys/class/powercap/intel-rapl:0/constraint_0_power_limit_uw", "r");
+  if (file == NULL) {
+    log_message(LOG_ERROR, "Failed to open constraint_0_power_limit_uw file for reading");
+    range.defaultPowerCap = -1;
+    return range;
+  }
+
+  if (fscanf(file, "%llu", &powerCap_uw) != 1) {
+    log_message(LOG_ERROR, "Failed to read power cap value");
+    fclose(file);
+    range.defaultPowerCap = -1;
+    return range;
+  }
+
+  fclose(file);
+
+  // range.defaultPowerCap = (float)powerCap_uw / 1e6;
+  range.defaultPowerCap = range.max;
+  file = fopen("/sys/class/powercap/intel-rapl:0/constraint_0_time_window_us", "r");
+  if (file == NULL) {
+    log_message(LOG_ERROR, "Failed to open constraint_0_time_window_us file for reading");
+    range.defaultTimeWindowUs = -1;
+    return range;
+  }
+
+  if (fscanf(file, "%llu", &timeWindow_us) != 1) {
+    log_message(LOG_ERROR, "Failed to read time window value");
+    fclose(file);
+    range.defaultTimeWindowUs = -1;
+    return range;
+  }
+
+  fclose(file);
+
+  range.defaultTimeWindowUs = timeWindow_us;
+
+  return range;
+}
+
+// Clamp helper
+static inline double __cudampi__clamp(double v, double lo, double hi) {
+  return v < lo ? lo : (v > hi ? hi : v);
+}
+
+// Map physical cap value in [minv,maxv] to normalized [0,1]
+double __cudampi__cap_to_norm(double cap, double minv, double maxv) {
+  double range = maxv - minv;
+  double p = (cap - minv) / range;
+  return __cudampi__clamp(p, 0.0, 1.0);
+}
+
+// Map normalized p in [0,1] to physical cap in [minv,maxv]
+double __cudampi__norm_to_cap(double p, double minv, double maxv) {
+  double pn = __cudampi__clamp(p, 0.0, 1.0);
+  return minv + pn * (maxv - minv);
+}
+
+powercapRange_t __cudampi__getGpuPowerCapRange(int gpuid)
+{
+  powercapRange_t range;
+  nvmlReturn_t result;
+  unsigned int min, max, defaultPower;
+  nvmlDevice_t nvmlDevice;
+
+  result = nvmlDeviceGetHandleByIndex(gpuid, &nvmlDevice);
+  if (result != NVML_SUCCESS) {
+      log_message(LOG_ERROR, "nvmlDeviceGetHandleByIndex failed: %s", nvmlErrorString(result));
+      range.min = -1;
+      range.max = -1;
+      range.defaultPowerCap = -1;
+      return range;
+  }
+
+  result = nvmlDeviceGetPowerManagementLimitConstraints(nvmlDevice, &min, &max);
+  if (result != NVML_SUCCESS) {
+      log_message(LOG_ERROR, "Failed to get power management limit constraints: %s", nvmlErrorString(result));
+      range.min = -1;
+      range.max = -1;
+      range.defaultPowerCap = -1;
+      return range;
+  }
+
+  result = nvmlDeviceGetPowerManagementDefaultLimit(nvmlDevice, &defaultPower);
+  if (result != NVML_SUCCESS) {
+      log_message(LOG_ERROR, "Failed to get current power management limit: %s", nvmlErrorString(result));
+      range.min = -1;
+      range.max = -1;
+      range.defaultPowerCap = -1;
+      return range;
+  }
+  range.defaultPowerCap = (float) defaultPower / 1000.0;
+
+  range.min = (float)min / 1000.0;
+  //range.max = (float)max / 1000.0;
+  range.max = range.defaultPowerCap;
+
+  return range;
+}
+
+void nvmlSetGpuPowerCap(int gpuid, float powerCap)
+{
+  nvmlReturn_t result;
+  nvmlDevice_t nvmlDevice;
+  unsigned int powerCap_uw = (unsigned int)powerCap;
+
+  result = nvmlDeviceGetHandleByIndex(gpuid, &nvmlDevice);
+  if (result != NVML_SUCCESS) {
+      log_message(LOG_ERROR, "nvmlDeviceGetHandleByIndex failed: %s", nvmlErrorString(result));
+      return;
+  }
+
+  result = nvmlDeviceSetPowerManagementLimit(nvmlDevice, powerCap_uw);
+  if (result != NVML_SUCCESS) {
+      log_message(LOG_ERROR, "Failed to set power management limit (%ld): %s", powerCap_uw, nvmlErrorString(result));
+  }
+}
+
+// Workaround for lack of permissions to set GPU power cap directly
+// Communicate with a daemon via UNIX socket to set the power cap
+int socketSetGpuPowerCap(int gpuid, float powerCap)
+{
+    int sock;
+    struct sockaddr_un addr;
+    char payload[256];
+    char resp[1024];
+
+    // Create JSON request
+    int json_len = snprintf(payload, sizeof(payload),
+        "{\"command\":\"set_gpu_power_limit\",\"gpu_index\":%d,\"power_limit\":%.3f}",
+        gpuid, powerCap);
+    if (json_len < 0 || json_len >= (int)sizeof(payload)) {
+        log_message(LOG_ERROR,"Failed to create JSON payload");
+        return 1;
+    }
+
+    // Open UNIX socket
+    if ((sock = socket(AF_UNIX, SOCK_STREAM, 0)) < 0) {
+        log_message(LOG_ERROR,"socket creation failed: %s\n", strerror(errno));
+        return 1;
+    }
+
+    memset(&addr, 0, sizeof(addr));
+    addr.sun_family = AF_UNIX;
+    strncpy(addr.sun_path, SOCKET_PATH, sizeof(addr.sun_path) - 1);
+
+    if (connect(sock, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
+        log_message(LOG_ERROR,"connect failed: %s\n", strerror(errno));
+        close(sock);
+        return 1;
+    }
+
+    // Send request
+    if (send(sock, payload, strlen(payload), 0) < 0) {
+        log_message(LOG_ERROR,"send failed: %s\n", strerror(errno));
+        close(sock);
+        return 1;
+    }
+
+    // Receive response
+    ssize_t n = recv(sock, resp, sizeof(resp) - 1, 0);
+    if (n > 0) {
+        resp[n] = '\0';
+        log_message(LOG_DEBUG,"Daemon response: %s\n", resp);
+    } else if (n < 0) {
+        log_message(LOG_ERROR,"recv failed: %s\n", strerror(errno));
+        close(sock);
+        return 1;
+    }
+
+    close(sock);
+    return 0;
+}
+
+
+void __cudampi__setGpuPowerCap(int gpuid, float powerCap)
+{
+  log_message(LOG_DEBUG, "Setting GPU%d power cap to %f W ", gpuid, powerCap);
+  if (socketSetGpuPowerCap(gpuid, powerCap) == 1) {
+    nvmlSetGpuPowerCap(gpuid, powerCap);
+  }
+}
+
+void __cudampi__setCpuPowerCap(float powerCap, unsigned long long timeWindowUs)
+{
+  unsigned long long powerCap_uw = (unsigned long long)(powerCap * 1e6);
+  FILE *file;
+  log_message(LOG_DEBUG, "Setting CPU power cap to %f W with time window %llu us", powerCap, timeWindowUs);
+
+  // Write the time window
+  file = fopen("/sys/class/powercap/intel-rapl:0/constraint_0_time_window_us", "w");
+  if (file == NULL) {
+    log_message(LOG_ERROR, "Failed to open constraint_0_time_window_us file for writing");
+  } else {
+    if (fprintf(file, "%llu", timeWindowUs) < 0) {
+      log_message(LOG_ERROR, "Failed to write time window value");
+    }
+    fclose(file);
+  }
+
+  // Write the power limit
+  file = fopen("/sys/class/powercap/intel-rapl:0/constraint_0_power_limit_uw", "w");
+  if (file == NULL) {
+    log_message(LOG_ERROR, "Failed to open constraint_0_power_limit_uw file for writing");
+  } else {
+    if (fprintf(file, "%llu", powerCap_uw) < 0) {
+      log_message(LOG_ERROR, "Failed to write power cap value");
+    }
+    fclose(file);
+  }
 }
 
 cudaError_t __cudampi__getCpuFreeThreads(int* count)
@@ -96,6 +342,7 @@ cudaError_t __cudampi__getCpuFreeThreads(int* count)
         fclose(file);
         return cudaErrorUnknown;
     }
+  
     *energyUsed = ((float)((energy_uj + maxCounter) / 1e6)) - *lastEnergyMeasured;
   }
 
