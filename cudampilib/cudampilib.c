@@ -702,7 +702,6 @@ void __cudampi__terminateMPI() {
   // If dynamic optimisation was enabled, print exploration/exploitation phase stats
   if (__cudampi__powercapStrategy == EDP_GRADIENT_SIMPLE ||
       __cudampi__powercapStrategy == EDP_GRADIENT_SPSA ||
-      __cudampi__powercapStrategy == EDP_GRADIENT_SIMPLE_ADAPTIVE ||
       __cudampi__powercapStrategy == EDP_GRADIENT_CMAES) {
     // Total datapoints (sum over devices)
     unsigned long long totalDataPoints = 0ULL;

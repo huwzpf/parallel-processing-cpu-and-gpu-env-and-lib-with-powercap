@@ -1,6 +1,0 @@
-echo pattern search
-./run-power patternsearch | tee out.patternsearch-power | cat
-echo collatz
-./run-power collatz | tee out.collatz-power | cat
-echo vecmaxdiv
-./run-power vecmaxdiv | tee out.vecmaxdiv-power | cat
