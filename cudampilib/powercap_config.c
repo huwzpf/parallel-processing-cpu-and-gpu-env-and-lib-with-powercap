@@ -64,8 +64,6 @@ int load_powercap_config(const char *path, powercap_config_t *config) {
                     config->strategy = EDP_GRADIENT_SIMPLE;
                 } else if (strcmp(value, "EDP_GRADIENT_SPSA") == 0) {
                     config->strategy = EDP_GRADIENT_SPSA;
-                } else if (strcmp(value, "EDP_GRADIENT_SIMPLE_ADAPTIVE") == 0) {
-                    config->strategy = EDP_GRADIENT_SIMPLE_ADAPTIVE;
                 } else if (strcmp(value, "EDP_GRADIENT_CMAES") == 0) {
                     config->strategy = EDP_GRADIENT_CMAES;
                 }

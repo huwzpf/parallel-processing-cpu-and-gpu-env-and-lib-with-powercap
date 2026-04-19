@@ -1,8 +1,0 @@
-echo pattern search
-./run patternsearch | tee out.patternsearch | cat
-echo collatz
-./run collatz | tee out.collatz | cat
-echo vecmaxdiv
-./run vecmaxdiv | tee out.vecmaxdiv | cat
-
-

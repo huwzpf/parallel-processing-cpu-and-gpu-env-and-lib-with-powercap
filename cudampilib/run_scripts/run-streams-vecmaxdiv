@@ -1,5 +1,0 @@
-#!/bin/bash
-
-BUILD_DIR="build"
-
-mpirun --mca orte_keep_fqdn_hostnames t --mca btl_tcp_if_exclude docker0,docker_gwbridge,lo --bind-to none --machinefile ./hostfile -np 1 ./$BUILD_DIR/app-streams-vecmaxdiv $2 $3 : -np $1 ./$BUILD_DIR/cudampislave-vecmaxdiv
