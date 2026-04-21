@@ -18,6 +18,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OU
 #include <nvml.h>
 #include <omp.h>
 #include <assert.h>
+#include <signal.h>
 
 #define ENABLE_LOGGING
 #define MPI_LOGGING
@@ -62,6 +63,19 @@ static struct argp argp = { options, parse_opt, args_doc, doc };
 // Counter that holds a unique tag for asynchronously exchanged messages
 // it increments by 2 (D_MSG_TAG) to accomodate data message and status
 int asyncMsgCounter = MIN_ASYNC_MSG_TAG;
+
+static volatile sig_atomic_t __cudampi__cleanupInProgress = 0;
+static int __cudampi__mpiInitialized = 0;
+static int __cudampi__nvmlInitialized = 0;
+static int __cudampi__powercapRangesInitialized = 0;
+static int __cudampi__communicatorsInitialized = 0;
+static int __cudampi__remoteFinalizeSent = 0;
+static int __cudampi__localPowercapsReset = 0;
+
+static void __cudampi__sendRemoteFinalizeRequests(void);
+static void __cudampi__cleanupOnProcessExit(void);
+static void __cudampi__terminationSignalHandler(int signum);
+static void __cudampi__installTerminationHandlers(void);
 
 typedef struct memcpy_queue_entry {
     MPI_Request dataRequest;
@@ -228,6 +242,64 @@ int getMsgCounter() {
     asyncMsgCounter += D_MSG_TAG;
   }
   return result;
+}
+
+static void __cudampi__sendRemoteFinalizeRequests(void) {
+  if (__cudampi__remoteFinalizeSent || !__cudampi__communicatorsInitialized) {
+    return;
+  }
+
+  __cudampi__remoteFinalizeSent = 1;
+  for (int i = __cudampi__localGpuDeviceCount; i < __cudampi_totaldevicecount; i++) {
+    MPI_Send(NULL, 0, MPI_CHAR, 1, __cudampi__CUDAMPIFINALIZE, __cudampi__communicators[i]);
+  }
+}
+
+static void __cudampi__cleanupOnProcessExit(void) {
+  if (__cudampi__cleanupInProgress) {
+    return;
+  }
+  __cudampi__cleanupInProgress = 1;
+
+  __cudampi__sendRemoteFinalizeRequests();
+
+  if (!__cudampi__localPowercapsReset && __cudampi__powercapRangesInitialized) {
+    __cudampi__resetLocalPowercaps();
+    __cudampi__localPowercapsReset = 1;
+  }
+
+  __cudampi__cmaesCleanup();
+
+  if (__cudampi__nvmlInitialized) {
+    nvmlShutdown();
+    __cudampi__nvmlInitialized = 0;
+  }
+
+  if (__cudampi__mpiInitialized) {
+    int finalized = 0;
+    MPI_Finalized(&finalized);
+    if (!finalized) {
+      MPI_Finalize();
+    }
+    __cudampi__mpiInitialized = 0;
+  }
+}
+
+static void __cudampi__terminationSignalHandler(int signum) {
+  __cudampi__cleanupOnProcessExit();
+  signal(signum, SIG_DFL);
+  raise(signum);
+}
+
+static void __cudampi__installTerminationHandlers(void) {
+  struct sigaction action;
+  memset(&action, 0, sizeof(action));
+  action.sa_handler = __cudampi__terminationSignalHandler;
+  sigemptyset(&action.sa_mask);
+  sigaction(SIGINT, &action, NULL);
+  sigaction(SIGTERM, &action, NULL);
+  sigaction(SIGHUP, &action, NULL);
+  atexit(__cudampi__cleanupOnProcessExit);
 }
 
 static error_t parse_opt(int key, char *arg, struct argp_state *state)
@@ -432,6 +504,8 @@ void __cudampi__initializeMPI(int argc, char **argv) {
   int i;
 
   MPI_Init_thread(&argc, &argv, MPI_THREAD_MULTIPLE, &mtsprovided);
+  __cudampi__mpiInitialized = 1;
+  __cudampi__installTerminationHandlers();
 
   if (mtsprovided != MPI_THREAD_MULTIPLE) {
     log_message(LOG_ERROR,"\nNo support for MPI_THREAD_MULTIPLE mode.\n");
@@ -497,6 +571,7 @@ void __cudampi__initializeMPI(int argc, char **argv) {
       log_message(LOG_ERROR, "nvmlInit failed: %s\n", nvmlErrorString(nvmlResult));
       exit(-1);
   }
+  __cudampi__nvmlInitialized = 1;
 
   // Powercap may be set via config; CLI fallback handled inside loader
 
@@ -540,6 +615,7 @@ void __cudampi__initializeMPI(int argc, char **argv) {
 
   // Gather powercap ranges (includes broadcasting CPU time window)
   __cudampi__allocAndGatherPowercapRanges();
+  __cudampi__powercapRangesInitialized = 1;
 
   // check if there is a configuration file
   FILE *filep = fopen("__cudampi.conf", "r");
@@ -654,6 +730,7 @@ void __cudampi__initializeMPI(int argc, char **argv) {
 
     MPI_Comm_create(MPI_COMM_WORLD, tempgroup, &(__cudampi__communicators[i]));
   }
+  __cudampi__communicatorsInitialized = 1;
 
   // apply changes to all powercaps
   __cudampi__applyAllPowercaps();
@@ -688,14 +765,17 @@ void __cudampi__terminateMPI() {
   log_message(LOG_INFO, "Total data points processed by CPU threads: %llu", cpuDataPointsSent);
   log_message(LOG_INFO, "CPU to GPU data points ratio: %lf", (double)cpuDataPointsSent / (double)gpuDataPointsSent);
   // finalize the other nodes -> shut down threads responsible for remote GPUs
+  __cudampi__sendRemoteFinalizeRequests();
 
-  for (int i = __cudampi__localGpuDeviceCount; i < __cudampi_totaldevicecount; i++) {
-    MPI_Send(NULL, 0, MPI_CHAR, 1, __cudampi__CUDAMPIFINALIZE, __cudampi__communicators[i]);
+  if (!__cudampi__localPowercapsReset) {
+    __cudampi__resetLocalPowercaps();
+    __cudampi__localPowercapsReset = 1;
   }
 
-  __cudampi__resetLocalPowercaps();
-
-  nvmlShutdown();
+  if (__cudampi__nvmlInitialized) {
+    nvmlShutdown();
+    __cudampi__nvmlInitialized = 0;
+  }
 
   log_message(LOG_ERROR, "Terminating CUDAMPILIB, Total energy used %lf J", __cudampi__totalEnergyUsed);
 
@@ -746,6 +826,7 @@ void __cudampi__terminateMPI() {
   }
 
   MPI_Finalize();
+  __cudampi__mpiInitialized = 0;
 }
 
 int __cudampi__gettargetGPU(int device) {

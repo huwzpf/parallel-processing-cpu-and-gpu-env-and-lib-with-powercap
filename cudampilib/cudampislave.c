@@ -11,9 +11,11 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OU
 #include <omp.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <sys/queue.h>
 #include <nvml.h>
 #include <assert.h>
+#include <signal.h>
 
 #include "cudampi.h"
 #include "cudampicommon.h"
@@ -52,6 +54,16 @@ perNodePowerCapRange_t __cudampi__localPowerCapRange;
 int __cudampi__cpu_enabled;
 float __cudampi__cpu_power_scaling;
 
+static volatile sig_atomic_t __cudampi__slaveCleanupInProgress = 0;
+static int __cudampi__slaveNvmlInitialized = 0;
+static int __cudampi__slavePowercapRangesInitialized = 0;
+static int __cudampi__slaveLocalPowercapsReset = 0;
+
+static void __cudampi__slaveResetLocalPowercaps(void);
+static void __cudampi__slaveCleanupOnProcessExit(void);
+static void __cudampi__slaveTerminationSignalHandler(int signum);
+static void __cudampi__slaveInstallTerminationHandlers(void);
+
 unsigned long cpuStreamsValid[CPU_STREAMS_SUPPORTED];
 
 typedef struct task_queue_entry {
@@ -83,6 +95,50 @@ int isInitialCpuEnergyMeasured[MAX_THREADS] = {0};
 void launchkernel(void *devPtr, unsigned long batchSize, unsigned long long id);
 void launchkernelinstream(void *devPtr, unsigned long batchSize, cudaStream_t stream, unsigned long long id);
 void launchcpukernel(void *devPtr, unsigned long batchSize, int num_threads, unsigned long long id);
+
+static void __cudampi__slaveResetLocalPowercaps(void) {
+  if (__cudampi__slaveLocalPowercapsReset || !__cudampi__slavePowercapRangesInitialized) {
+    return;
+  }
+
+  __cudampi__setCpuPowerCap(__cudampi__localPowerCapRange.cpuRange.defaultPowerCap,
+                            __cudampi__localPowerCapRange.cpuRange.defaultTimeWindowUs);
+  for (int i = 0; i < __cudampi__localGpuDeviceCount; i++) {
+    __cudampi__setGpuPowerCap(i, __cudampi__localPowerCapRange.gpuRange[i].defaultPowerCap);
+  }
+  __cudampi__slaveLocalPowercapsReset = 1;
+}
+
+static void __cudampi__slaveCleanupOnProcessExit(void) {
+  if (__cudampi__slaveCleanupInProgress) {
+    return;
+  }
+  __cudampi__slaveCleanupInProgress = 1;
+
+  __cudampi__slaveResetLocalPowercaps();
+
+  if (__cudampi__slaveNvmlInitialized) {
+    nvmlShutdown();
+    __cudampi__slaveNvmlInitialized = 0;
+  }
+}
+
+static void __cudampi__slaveTerminationSignalHandler(int signum) {
+  __cudampi__slaveCleanupOnProcessExit();
+  signal(signum, SIG_DFL);
+  raise(signum);
+}
+
+static void __cudampi__slaveInstallTerminationHandlers(void) {
+  struct sigaction action;
+  memset(&action, 0, sizeof(action));
+  action.sa_handler = __cudampi__slaveTerminationSignalHandler;
+  sigemptyset(&action.sa_mask);
+  sigaction(SIGINT, &action, NULL);
+  sigaction(SIGTERM, &action, NULL);
+  sigaction(SIGHUP, &action, NULL);
+  atexit(__cudampi__slaveCleanupOnProcessExit);
+}
 
 typedef struct {
   unsigned char* buffer;
@@ -482,6 +538,7 @@ int main(int argc, char **argv) {
   int mtsprovided;
 
   MPI_Init_thread(&argc, &argv, MPI_THREAD_MULTIPLE, &mtsprovided);
+  __cudampi__slaveInstallTerminationHandlers();
 
   if (mtsprovided != MPI_THREAD_MULTIPLE) {
     log_message(LOG_ERROR, "\nNo support for MPI_THREAD_MULTIPLE mode.\n");
@@ -521,6 +578,7 @@ int main(int argc, char **argv) {
       log_message(LOG_ERROR, "nvmlInit failed: %s\n", nvmlErrorString(nvmlResult));
       return -1;
   }
+  __cudampi__slaveNvmlInitialized = 1;
 
   MPI_Bcast(&__cudampi__cpu_enabled, 1, MPI_INT, 0, MPI_COMM_WORLD);
   MPI_Bcast(&__cudampi__cpu_power_scaling, 1, MPI_FLOAT, 0, MPI_COMM_WORLD);
@@ -546,6 +604,7 @@ int main(int argc, char **argv) {
   for (int i = 0; i < __cudampi__localGpuDeviceCount; i++) {
     __cudampi__localPowerCapRange.gpuRange[i] = __cudampi__getGpuPowerCapRange(i);
   }
+  __cudampi__slavePowercapRangesInitialized = 1;
 
   MPI_Allgather(&__cudampi__localGpuDeviceCount, 1, MPI_INT, __cudampi__GPUcountspernode, 1, MPI_INT, MPI_COMM_WORLD);
 
@@ -1220,14 +1279,12 @@ int main(int argc, char **argv) {
     }
   }
   
-  // Reset CPU power cap
-  __cudampi__setCpuPowerCap(__cudampi__localPowerCapRange.cpuRange.defaultPowerCap, __cudampi__localPowerCapRange.cpuRange.defaultTimeWindowUs);
-  // Reset GPU power caps
-  for (int i = 0; i < __cudampi__localGpuDeviceCount; i++) {
-    __cudampi__setGpuPowerCap(i, __cudampi__localPowerCapRange.gpuRange[i].defaultPowerCap);
-  }
+  __cudampi__slaveResetLocalPowercaps();
 
-  nvmlShutdown();
+  if (__cudampi__slaveNvmlInitialized) {
+    nvmlShutdown();
+    __cudampi__slaveNvmlInitialized = 0;
+  }
   MPI_Finalize();
   
   for (int i = 0; i < ALL_CPU_STREAMS; i++)
