@@ -39,10 +39,17 @@ typedef struct
 {
     powercapRange_t powercapRange;
     float currentPower;
+    float currentEnergy;
     float currentPowerCap;
     float minPowerCap;
     int deviceEnabled;
 } devicePowerConfig_t;
+
+typedef struct {
+    cudaError_t status;
+    float gpu_energy_j;
+    float cpu_energy_j;
+} deviceSyncEnergyResponse_t;
 
 typedef enum {
     BASE,          /* used by simple/adaptive FD; unused in SPSA */
@@ -57,6 +64,8 @@ typedef struct {
     double  alpha;
     gradientOptState     mode;
     double  base_x   [__CUDAMPI_MAX_THREAD_COUNT];
+    double  x_plus   [__CUDAMPI_MAX_THREAD_COUNT];
+    double  x_minus  [__CUDAMPI_MAX_THREAD_COUNT];
     double  delta   [__CUDAMPI_MAX_THREAD_COUNT];
     double  J_plus;
     int     iter;                      /* iteration counter */
@@ -70,6 +79,8 @@ typedef struct {
     gradientOptState     mode;
     int     probe_dim;                      /* which coordinate probe  */ 
     double  base_x   [__CUDAMPI_MAX_THREAD_COUNT];
+    double  x_plus   [__CUDAMPI_MAX_THREAD_COUNT];
+    double  x_minus  [__CUDAMPI_MAX_THREAD_COUNT];
     double  base_y;
     double  J_plus;                         /* stores J at +eps probe */
     double  grad     [__CUDAMPI_MAX_THREAD_COUNT];
@@ -148,13 +159,15 @@ typedef struct {
 
 float computeDevPerformance(double period_us);
 
-float getGPUpower(int gpuid);
+cudaError_t getGpuEnergyUsed(int gpuid, unsigned long long *last_energy_mj, float *energy_used_j);
 
 cudaError_t getCpuEnergyUsed(float* lastEnergyMeasured, float* energyUsed);
 
 cudaError_t __cudampi__getCpuFreeThreads(int* count);
 
 void initializeCpuEnergyMeasurement(int* isInitialCpuEnergyMeasured, omp_lock_t* cpuEnergyLock, float* cpuLastEnergyMeasured);
+
+void initializeGpuEnergyMeasurement(int gpuid, int* isInitialGpuEnergyMeasured, omp_lock_t* gpuEnergyLock, unsigned long long* gpuLastEnergyMeasured);
 
 powercapRange_t __cudampi__getCpuPowerCapRange();
 

@@ -91,6 +91,9 @@ int scheduledTasksInStream[ALL_CPU_STREAMS];
 float cpuLastEnergyMeasured[MAX_THREADS] = {0.0};
 omp_lock_t cpuEnergyLock[MAX_THREADS];
 int isInitialCpuEnergyMeasured[MAX_THREADS] = {0};
+unsigned long long gpuLastEnergyMeasured[MAX_GPU_PER_NODE] = {0ULL};
+omp_lock_t gpuEnergyLock[MAX_GPU_PER_NODE];
+int isInitialGpuEnergyMeasured[MAX_GPU_PER_NODE] = {0};
 
 void launchkernel(void *devPtr, unsigned long batchSize, unsigned long long id);
 void launchkernelinstream(void *devPtr, unsigned long batchSize, cudaStream_t stream, unsigned long long id);
@@ -534,6 +537,9 @@ int main(int argc, char **argv) {
   for (int i = 0; i < MAX_THREADS; i++) {
     omp_init_lock(&cpuEnergyLock[i]);
   }
+  for (int i = 0; i < MAX_GPU_PER_NODE; i++) {
+    omp_init_lock(&gpuEnergyLock[i]);
+  }
 
   int mtsprovided;
 
@@ -737,9 +743,10 @@ int main(int argc, char **argv) {
 
           // perform power measurement and attach it to the response
 
-          size_t ssize = sizeof(cudaError_t) + sizeof(float) + sizeof(float);
+          size_t ssize = sizeof(deviceSyncEnergyResponse_t);
           unsigned char sdata[ssize];
-          float gpuPowerMeasured = -1.0;
+          deviceSyncEnergyResponse_t response;
+          float gpuEnergyMeasured = -1.0;
           float cpuEnergyMeasured = -1.0;
 
           int device;
@@ -762,11 +769,17 @@ int main(int argc, char **argv) {
             else {
               cpuEnergyMeasured *= ((1 - __cudampi__cpu_power_scaling) / __cudampi__localGpuDeviceCount);
             }
-            gpuPowerMeasured = getGPUpower(device);
+
+            error = getGpuEnergyUsed(device, &gpuLastEnergyMeasured[device], &gpuEnergyMeasured);
+            if (error != cudaSuccess) {
+              gpuEnergyMeasured = -1.0f;
+            }
           }
 
-          *((float *)(sdata + sizeof(cudaError_t))) = gpuPowerMeasured;
-          *((float *)(sdata + sizeof(cudaError_t) + sizeof(float))) = cpuEnergyMeasured;
+          response.status = e;
+          response.gpu_energy_j = gpuEnergyMeasured;
+          response.cpu_energy_j = cpuEnergyMeasured;
+          memcpy(sdata, &response, sizeof(response));
 
           MPI_Send(sdata, ssize, MPI_UNSIGNED_CHAR, 0, __cudampi__CUDAMPIDEVICESYNCHRONIZERESP, __cudampi__communicators[omp_get_thread_num()]);
           updateGlobalGpuMemcpyBuffer(&gpuMemcpyBuffer);
@@ -932,6 +945,9 @@ int main(int argc, char **argv) {
           void *devPtr = *((void **)rdata);
           unsigned long batchSize = *((unsigned long *)(rdata + sizeof(void *)));
           unsigned long long id = *((unsigned long long *)(rdata + sizeof(void *) + sizeof(unsigned long)));
+          int device;
+          cudaGetDevice(&device);
+          initializeGpuEnergyMeasurement(device, isInitialGpuEnergyMeasured, gpuEnergyLock, gpuLastEnergyMeasured);
 
           launchkernel(devPtr, batchSize, id);
 
@@ -956,6 +972,9 @@ int main(int argc, char **argv) {
           unsigned long batchSize = *((unsigned long *)(rdata + sizeof(void *)));
           cudaStream_t stream = *((cudaStream_t *)(rdata + sizeof(void *) + sizeof(unsigned long)));
           unsigned long long id = *((unsigned long long *)(rdata + sizeof(void *) + sizeof(unsigned long) + sizeof(cudaStream_t)));
+          int device;
+          cudaGetDevice(&device);
+          initializeGpuEnergyMeasurement(device, isInitialGpuEnergyMeasured, gpuEnergyLock, gpuLastEnergyMeasured);
 
           launchkernelinstream(devPtr, batchSize, stream, id);
         }
@@ -1296,5 +1315,8 @@ int main(int argc, char **argv) {
   
   for (int i = 0; i < MAX_THREADS; i++) {
     omp_destroy_lock(&cpuEnergyLock[i]);
+  }
+  for (int i = 0; i < MAX_GPU_PER_NODE; i++) {
+    omp_destroy_lock(&gpuEnergyLock[i]);
   }
 }

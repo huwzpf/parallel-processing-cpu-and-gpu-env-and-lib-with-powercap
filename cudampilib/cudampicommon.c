@@ -33,25 +33,42 @@ float computeDevPerformance(double period_us) {
   return 1000000.0 / period_us;
 }
 
-float getGPUpower(int gpuid) {
+cudaError_t getGpuEnergyUsed(int gpuid, unsigned long long *last_energy_mj, float *energy_used_j) {
     nvmlReturn_t result;
-    unsigned int power_mw;
-    float power_watts;
+    unsigned long long energy_mj;
     nvmlDevice_t nvmlDevice;
+
+    if (last_energy_mj == NULL || energy_used_j == NULL) {
+        return cudaErrorUnknown;
+    }
 
     result = nvmlDeviceGetHandleByIndex(gpuid, &nvmlDevice);
     if (result != NVML_SUCCESS) {
         log_message(LOG_ERROR, "nvmlDeviceGetHandleByIndex failed: %s", nvmlErrorString(result));
-        return -1;
+        return cudaErrorUnknown;
     }
 
-    result = nvmlDeviceGetPowerUsage(nvmlDevice, &power_mw);
+    result = nvmlDeviceGetTotalEnergyConsumption(nvmlDevice, &energy_mj);
     if (result != NVML_SUCCESS) {
-        log_message(LOG_ERROR, "Failed to get power usage: %s", nvmlErrorString(result));
-        return -1;
+        log_message(LOG_ERROR, "Failed to get total GPU energy for GPU %d: %s", gpuid, nvmlErrorString(result));
+        return cudaErrorUnknown;
     }
 
-    return (float)power_mw / 1000.0;
+    if (*last_energy_mj == 0ULL) {
+        *last_energy_mj = energy_mj;
+        *energy_used_j = 0.0f;
+        return cudaSuccess;
+    }
+
+    if (energy_mj >= *last_energy_mj) {
+        *energy_used_j = (float)(energy_mj - *last_energy_mj) / 1000.0f;
+    } else {
+        log_message(LOG_ERROR, "GPU energy counter for GPU %d moved backwards (%llu -> %llu)", gpuid, *last_energy_mj, energy_mj);
+        *energy_used_j = 0.0f;
+    }
+
+    *last_energy_mj = energy_mj;
+    return cudaSuccess;
 }
 
 powercapRange_t __cudampi__getCpuPowerCapRange()
@@ -363,5 +380,23 @@ void initializeCpuEnergyMeasurement(int* isInitialCpuEnergyMeasured, omp_lock_t*
       getCpuEnergyUsed(&cpuLastEnergyMeasured[omp_get_thread_num()], &cpuEnergyMeasured);
     }
     omp_unset_lock(&cpuEnergyLock[omp_get_thread_num()]);
+  }
+}
+
+void initializeGpuEnergyMeasurement(int gpuid, int* isInitialGpuEnergyMeasured, omp_lock_t* gpuEnergyLock, unsigned long long* gpuLastEnergyMeasured) {
+  if (gpuid < 0 || gpuid >= MAX_GPU_PER_NODE) {
+    log_message(LOG_ERROR, "Invalid GPU id %d for energy measurement initialization", gpuid);
+    return;
+  }
+
+  if (!isInitialGpuEnergyMeasured[gpuid]) {
+    omp_set_lock(&gpuEnergyLock[gpuid]);
+    if (!isInitialGpuEnergyMeasured[gpuid]) {
+      float gpuEnergyMeasured;
+      if (getGpuEnergyUsed(gpuid, &gpuLastEnergyMeasured[gpuid], &gpuEnergyMeasured) == cudaSuccess) {
+        isInitialGpuEnergyMeasured[gpuid] = 1;
+      }
+    }
+    omp_unset_lock(&gpuEnergyLock[gpuid]);
   }
 }

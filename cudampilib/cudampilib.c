@@ -39,6 +39,9 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OU
 float cpuLastEnergyMeasured[MAX_THREADS] = {0.0};
 omp_lock_t cpuEnergyLock[MAX_THREADS];
 int isInitialCpuEnergyMeasured[MAX_THREADS] = {0};
+unsigned long long gpuLastEnergyMeasured[MAX_GPU_PER_NODE] = {0ULL};
+omp_lock_t gpuEnergyLock[MAX_GPU_PER_NODE];
+int isInitialGpuEnergyMeasured[MAX_GPU_PER_NODE] = {0};
 
 int powermeasurecounter[__CUDAMPI_MAX_THREAD_COUNT] = {0};
 extern struct __cudampi__arguments_type __cudampi__arguments;
@@ -742,6 +745,9 @@ void __cudampi__initializeMPI(int argc, char **argv) {
   for (int i = 0; i < MAX_THREADS; i++) {
     omp_init_lock(&cpuEnergyLock[i]);
   }
+  for (int i = 0; i < MAX_GPU_PER_NODE; i++) {
+    omp_init_lock(&gpuEnergyLock[i]);
+  }
 }
 
 void __cudampi__terminateMPI() {
@@ -823,6 +829,9 @@ void __cudampi__terminateMPI() {
 
   for (int i = 0; i < MAX_THREADS; i++) {
     omp_destroy_lock(&cpuEnergyLock[i]);
+  }
+  for (int i = 0; i < MAX_GPU_PER_NODE; i++) {
+    omp_destroy_lock(&gpuEnergyLock[i]);
   }
 
   MPI_Finalize();
@@ -955,32 +964,36 @@ cudaError_t __cudampi__cudaDeviceSynchronize(void)
 cudaError_t __cudampi__deviceSynchronize(void) {
 
   cudaError_t retVal;
-  float energy = -1, power = -1;
+  float energy_cpu = -1.0f, power = -1.0f;
+  float gpu_energy = -1.0f;
 
   // Handle power-capping decisions (manager thread only)
   __cudampi__powercappingManagerStep();
 
   if (__cudampi_isLocalGpu) { // run GPU synchronization locally
 
-    // now get power measurement - this should be OK as we assume that computations might be taking place
+    retVal = cudaDeviceSynchronize();
 
     cudaError_t error = cudaErrorUnknown;
-    error = getCpuEnergyUsed(&cpuLastEnergyMeasured[__cudampi__currentDevice], &energy);
-    energy /= __cudampi__localGpuDeviceCount;
+    int localGpu = __cudampi__currentDevice;
+
+    error = getCpuEnergyUsed(&cpuLastEnergyMeasured[__cudampi__currentDevice], &energy_cpu);
+    energy_cpu /= __cudampi__localGpuDeviceCount;
     if (error != cudaSuccess) {
-      energy = -1;
+      energy_cpu = -1.0f;
     }
-    power = getGPUpower(__cudampi__currentDevice);
-    log_message(LOG_DEBUG, "Got local GPU power %f and CPU energy for this GPU %f", power, energy);
 
+    error = getGpuEnergyUsed(localGpu, &gpuLastEnergyMeasured[localGpu], &gpu_energy);
+    if (error != cudaSuccess) {
+      gpu_energy = -1.0f;
+    }
 
-    retVal = cudaDeviceSynchronize();
+    log_message(LOG_DEBUG, "Got local GPU energy %f J and CPU energy for this GPU %f",
+                gpu_energy, energy_cpu);
   } else { // run synchronization remotely
-    int targetrank = __cudampi__gettargetMPIrank(__cudampi__currentDevice);
-
     int sdata = 1; // if 0 then means do not measure power, if 1 do measure on the slave side
 
-    int rsize = sizeof(cudaError_t) + sizeof(float) + sizeof(float);
+    int rsize = sizeof(deviceSyncEnergyResponse_t);
     unsigned char rdata[rsize];
     if (__cudampi__isCpu())
     {
@@ -995,8 +1008,9 @@ cudaError_t __cudampi__deviceSynchronize(void) {
 
       // decode and store power consumption for the device
 
-      energy = *((float *)(rdata + sizeof(cudaError_t)));
-      log_message(LOG_DEBUG, "Got CPU energy %f", energy);
+      retVal = *((cudaError_t *)rdata);
+      energy_cpu = *((float *)(rdata + sizeof(cudaError_t)));
+      log_message(LOG_DEBUG, "Got CPU energy %f", energy_cpu);
     }
     else
     {
@@ -1008,13 +1022,14 @@ cudaError_t __cudampi__deviceSynchronize(void) {
 
       // decode and store power consumption for the device
 
-      power = *((float *)(rdata + sizeof(cudaError_t)));
-      energy = *((float *)(rdata + sizeof(cudaError_t) + sizeof(float)));
-      log_message(LOG_DEBUG, "Got remote GPU power %f and CPU energy for this GPU %f", power, energy);
+      deviceSyncEnergyResponse_t *resp = (deviceSyncEnergyResponse_t *)rdata;
+      retVal = resp->status;
+      gpu_energy = resp->gpu_energy_j;
+      energy_cpu = resp->cpu_energy_j;
+      log_message(LOG_DEBUG, "Got remote GPU energy %f J and CPU energy for this GPU %f",
+                  gpu_energy, energy_cpu);
     }
     process_queue();
-
-    retVal = ((cudaError_t)rdata);
   }
 
   powermeasurecounter[__cudampi__currentDevice]++;
@@ -1058,14 +1073,15 @@ cudaError_t __cudampi__deviceSynchronize(void) {
     // if batch size for that device was scaled down, time it would take to process full batch of data is calculated
     __cudampi__time_us[__cudampi__currentDevice] /= scaling_factor;
 
-    // assert(energy != -1);
-    if (__cudampi__isCpu() && (energy != -1)){
-      power = energy / time_in_seconds;
+    float intervalEnergy = -1.0f;
+
+    if (__cudampi__isCpu() && (energy_cpu >= 0.0f) && time_in_seconds > 0.0) {
+      power = energy_cpu / time_in_seconds;
+      intervalEnergy = energy_cpu;
+    } else if (!__cudampi__isCpu() && gpu_energy >= 0.0f && time_in_seconds > 0.0) {
+      intervalEnergy = gpu_energy;
+      power = gpu_energy / time_in_seconds;
     }
-    // TODO: Consider if this should be uncommented
-    // if (!__cudampi__isCpu() && (energy != -1)) {
-    //  power += (energy / time_in_seconds);
-    // }
 
     if (power != (-1)) {
       __cudampi__devicePowerConfig[__cudampi__currentDevice].currentPower = power;
@@ -1076,8 +1092,22 @@ cudaError_t __cudampi__deviceSynchronize(void) {
       }
       
       log_message(LOG_DEBUG, "Got power %f with time in seconds = %f", power, time_in_seconds);
+    }
+
+    if (intervalEnergy > 0.0f) {
+      __cudampi__devicePowerConfig[__cudampi__currentDevice].currentEnergy = intervalEnergy;
       #pragma omp atomic
-      __cudampi__totalEnergyUsed += power * time_in_seconds;
+      __cudampi__totalEnergyUsed += intervalEnergy;
+    } else {
+      __cudampi__devicePowerConfig[__cudampi__currentDevice].currentEnergy = -1.0f;
+    }
+
+    if (__cudampi__devicePowerConfig[__cudampi__currentDevice].currentEnergy > 0.0f) {
+      log_message(LOG_INFO, "Device energy: device=%d type=%s energy=%.3fJ avg_power=%.3fW",
+                  __cudampi__currentDevice,
+                  __cudampi__isCpu() ? "CPU" : "GPU",
+                  __cudampi__devicePowerConfig[__cudampi__currentDevice].currentEnergy,
+                  __cudampi__devicePowerConfig[__cudampi__currentDevice].currentPower);
     }
     
     // Check if CPU batch size scaling was already done
@@ -1310,6 +1340,7 @@ void __cudampi__cudaKernelInStream(void *devPtr, unsigned long batchsize, cudaSt
 
   if (__cudampi_isLocalGpu) { // run locally
     initializeCpuEnergyMeasurement(isInitialCpuEnergyMeasured, cpuEnergyLock, cpuLastEnergyMeasured);
+    initializeGpuEnergyMeasurement(__cudampi__currentDevice, isInitialGpuEnergyMeasured, gpuEnergyLock, gpuLastEnergyMeasured);
     launchkernelinstream(devPtr, batchsize, stream, id);
   } else { // launch remotely
 
@@ -1333,6 +1364,7 @@ void __cudampi__cudaKernel(void *devPtr, unsigned long batchsize, unsigned long 
 
   if (__cudampi_isLocalGpu) { // run locally
     initializeCpuEnergyMeasurement(isInitialCpuEnergyMeasured, cpuEnergyLock, cpuLastEnergyMeasured);
+    initializeGpuEnergyMeasurement(__cudampi__currentDevice, isInitialGpuEnergyMeasured, gpuEnergyLock, gpuLastEnergyMeasured);
     launchkernel(devPtr, batchsize, id);
   } else { // launch remotely
 

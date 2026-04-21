@@ -61,6 +61,30 @@ float getFreePowerCap(int index) {
   return __cudampi__devicePowerConfig[index].powercapRange.max - __cudampi__devicePowerConfig[index].currentPowerCap;
 }
 
+static int __cudampi__isDynamicEdpStrategy(void) {
+  return __cudampi__powercapStrategy == EDP_GRADIENT_SIMPLE ||
+         __cudampi__powercapStrategy == EDP_GRADIENT_SPSA ||
+         __cudampi__powercapStrategy == EDP_GRADIENT_CMAES;
+}
+
+static double __cudampi__clamp01(double v) {
+  if (v < 0.0) return 0.0;
+  if (v > 1.0) return 1.0;
+  return v;
+}
+
+static double __cudampi__deviceLowerNorm(int i) {
+  double lower = (i < __cudampi_totalgpudevicecount) ? __cudampi__gpu_min_powercap : __cudampi__cpu_min_powercap;
+  return __cudampi__clamp01(lower);
+}
+
+static double __cudampi__clampNormForDevice(int i, double p) {
+  double lower = __cudampi__deviceLowerNorm(i);
+  if (p < lower) return lower;
+  if (p > 1.0) return 1.0;
+  return p;
+}
+
 void setDevicePowerCap(int index) {
   log_message(LOG_INFO, "Setting power cap of device %d to %.2f W", index, __cudampi__devicePowerConfig[index].currentPowerCap);
   if (index <  __cudampi__GPUcountspernode[0]) {
@@ -96,8 +120,11 @@ void __cudampi__cmaesCleanup(void) {
 }
 
 void __cudampi__updatePowerCap(float v, int i) {
-  if (v < __cudampi__devicePowerConfig[i].powercapRange.min) {
-    v = __cudampi__devicePowerConfig[i].powercapRange.min;
+  float minPowerCap = __cudampi__isDynamicEdpStrategy()
+                    ? __cudampi__devicePowerConfig[i].minPowerCap
+                    : __cudampi__devicePowerConfig[i].powercapRange.min;
+  if (v < minPowerCap) {
+    v = minPowerCap;
   } 
   else if (v > __cudampi__devicePowerConfig[i].powercapRange.max) {
     v = __cudampi__devicePowerConfig[i].powercapRange.max;
@@ -489,12 +516,12 @@ void __cudampi__gradientOptStepSpsa() {
         double minv = __cudampi__devicePowerConfig[i].powercapRange.min;
         double maxv = __cudampi__devicePowerConfig[i].powercapRange.max;
         double pbase = __cudampi__cap_to_norm((double)__cudampi__devicePowerConfig[i].currentPowerCap, minv, maxv);
-        if (pbase < 0.0) pbase = 0.0; if (pbase > 1.0) pbase = 1.0;
+        pbase = __cudampi__clampNormForDevice(i, pbase);
         g->base_x[i] = pbase;
 
         __cudampi__generatePerturbation(g, i);
-        double p = pbase + (g->eps * g->delta[i]);
-        if (p < 0.0) p = 0.0; if (p > 1.0) p = 1.0;
+        double p = __cudampi__clampNormForDevice(i, pbase + (g->eps * g->delta[i]));
+        g->x_plus[i] = p;
         double vcap = __cudampi__norm_to_cap(p, minv, maxv);
 
         log_message(LOG_INFO, "PROBE_PLUS: probe [%d] %f -> %f", i, g->base_x[i], p);
@@ -510,8 +537,8 @@ void __cudampi__gradientOptStepSpsa() {
       for (int i = 0; i < n; ++i) {
         double minv = __cudampi__devicePowerConfig[i].powercapRange.min;
         double maxv = __cudampi__devicePowerConfig[i].powercapRange.max;
-        double p = g->base_x[i] - (g->eps * g->delta[i]);
-        if (p < 0.0) p = 0.0; if (p > 1.0) p = 1.0;
+        double p = __cudampi__clampNormForDevice(i, g->base_x[i] - (g->eps * g->delta[i]));
+        g->x_minus[i] = p;
         double vcap = __cudampi__norm_to_cap(p, minv, maxv);
 
         log_message(LOG_INFO, "PROBE_MINUS: probe [%d] %f -> %f", i, g->base_x[i], p);
@@ -527,13 +554,18 @@ void __cudampi__gradientOptStepSpsa() {
       log_message(LOG_INFO, "DESCENT: J_plus=%lf J_minus=%lf", g->J_plus, J_minus);
       for (int i = 0; i < n; ++i) {
         // log-objective SPSA gradient in normalized space
-        double grad = (log(g->J_plus) - log(J_minus)) / (2.0 * g->eps * g->delta[i]);
-        double p = g->base_x[i] - (g->alpha * grad);
-        if (p < 0.0) p = 0.0; if (p > 1.0) p = 1.0;
+        double denom = g->x_plus[i] - g->x_minus[i];
+        double grad = 0.0;
+        if (fabs(denom) >= 1e-6) {
+          grad = (log(g->J_plus) - log(J_minus)) / denom;
+        }
+        double p = __cudampi__clampNormForDevice(i, g->base_x[i] - (g->alpha * grad));
         double minv = __cudampi__devicePowerConfig[i].powercapRange.min;
         double maxv = __cudampi__devicePowerConfig[i].powercapRange.max;
         double vcap = __cudampi__norm_to_cap(p, minv, maxv);
 
+        log_message(LOG_INFO, "SPSA grad[%d]: delta=%.0f x_minus=%.6f x_plus=%.6f denom=%.6f J+=%.8f J-=%.8f grad=%.8f",
+                    i, g->delta[i], g->x_minus[i], g->x_plus[i], denom, g->J_plus, J_minus, grad);
         log_message(LOG_INFO, "DESCENT: probe [%d] %f -> %f with grad=%lf", i, g->base_x[i], p, grad);
         __cudampi__updatePowerCap((float)vcap, i);
       }
@@ -665,7 +697,7 @@ void __cudampi__gradientOptStepSimple() {
       double minv = __cudampi__devicePowerConfig[i].powercapRange.min;
       double maxv = __cudampi__devicePowerConfig[i].powercapRange.max;
       double p = __cudampi__cap_to_norm((double)__cudampi__devicePowerConfig[i].currentPowerCap, minv, maxv);
-      if (p < 0.0) p = 0.0; if (p > 1.0) p = 1.0;
+      p = __cudampi__clampNormForDevice(i, p);
       g->base_x[i] = p;
     }
     g->probe_dim = 0;
@@ -677,15 +709,23 @@ void __cudampi__gradientOptStepSimple() {
     if (g->probe_dim > 0) {
       int dprev = g->probe_dim - 1;
       double J_minus_prev = __cudampi__edp;
-      g->grad[dprev] = (log(g->J_plus) - log(J_minus_prev)) / (2.0 * g->eps);
-      log_message(LOG_INFO, "FD-CENTRAL(LOG): grad[%d] = %f (J+ = %.6f, J- = %.6f)", dprev, g->grad[dprev], g->J_plus, J_minus_prev);
+      double denom = g->x_plus[dprev] - g->x_minus[dprev];
+      g->grad[dprev] = 0.0;
+      if (fabs(denom) >= 1e-6) {
+        g->grad[dprev] = (log(g->J_plus) - log(J_minus_prev)) / denom;
+      }
+      log_message(LOG_INFO, "FD grad[%d]: x_minus=%.6f x_plus=%.6f denom=%.6f J+=%.8f J-=%.8f grad=%.8f",
+                  dprev, g->x_minus[dprev], g->x_plus[dprev], denom, g->J_plus, J_minus_prev, g->grad[dprev]);
     }
     // schedule +eps probe for current coordinate
     for (int i = 0; i < n; ++i) {
       double minv = __cudampi__devicePowerConfig[i].powercapRange.min;
       double maxv = __cudampi__devicePowerConfig[i].powercapRange.max;
-      double p = g->base_x[i] + (i == g->probe_dim ? g->eps : 0.0);
-      if (p < 0.0) p = 0.0; if (p > 1.0) p = 1.0;
+      double p = g->base_x[i];
+      if (i == g->probe_dim) {
+        p = __cudampi__clampNormForDevice(i, g->base_x[i] + g->eps);
+        g->x_plus[i] = p;
+      }
       double vcap = __cudampi__norm_to_cap(p, minv, maxv);
       log_message(LOG_INFO, "FD-CENTRAL: PLUS probe [%d] %f -> %f", i, g->base_x[i], p);
       __cudampi__updatePowerCap((float)vcap, i);
@@ -701,8 +741,11 @@ void __cudampi__gradientOptStepSimple() {
     for (int i = 0; i < n; ++i) {
       double minv = __cudampi__devicePowerConfig[i].powercapRange.min;
       double maxv = __cudampi__devicePowerConfig[i].powercapRange.max;
-      double p = g->base_x[i] - (i == g->probe_dim ? g->eps : 0.0);
-      if (p < 0.0) p = 0.0; if (p > 1.0) p = 1.0;
+      double p = g->base_x[i];
+      if (i == g->probe_dim) {
+        p = __cudampi__clampNormForDevice(i, g->base_x[i] - g->eps);
+        g->x_minus[i] = p;
+      }
       double vcap = __cudampi__norm_to_cap(p, minv, maxv);
       log_message(LOG_INFO, "FD-CENTRAL: MINUS probe [%d] %f -> %f", i, g->base_x[i], p);
       __cudampi__updatePowerCap((float)vcap, i);
@@ -719,15 +762,19 @@ void __cudampi__gradientOptStepSimple() {
     // capture J_minus for the last dimension and compute its gradient
     int last = n - 1;
     double J_minus_last = __cudampi__edp;
-    g->grad[last] = (log(g->J_plus) - log(J_minus_last)) / (2.0 * g->eps);
-    log_message(LOG_INFO, "FD-CENTRAL(LOG): grad[%d] = %f (J+ = %.6f, J- = %.6f)", last, g->grad[last], g->J_plus, J_minus_last);
+    double denom = g->x_plus[last] - g->x_minus[last];
+    g->grad[last] = 0.0;
+    if (fabs(denom) >= 1e-6) {
+      g->grad[last] = (log(g->J_plus) - log(J_minus_last)) / denom;
+    }
+    log_message(LOG_INFO, "FD grad[%d]: x_minus=%.6f x_plus=%.6f denom=%.6f J+=%.8f J-=%.8f grad=%.8f",
+                last, g->x_minus[last], g->x_plus[last], denom, g->J_plus, J_minus_last, g->grad[last]);
 
     // full gradient available: take one descent step
     for (int i = 0; i < n; ++i) {
       double minv = __cudampi__devicePowerConfig[i].powercapRange.min;
       double maxv = __cudampi__devicePowerConfig[i].powercapRange.max;
-      double p = g->base_x[i] - g->alpha * g->grad[i];
-      if (p < 0.0) p = 0.0; if (p > 1.0) p = 1.0;
+      double p = __cudampi__clampNormForDevice(i, g->base_x[i] - g->alpha * g->grad[i]);
       double vcap = __cudampi__norm_to_cap(p, minv, maxv);
       log_message(LOG_INFO, "FD-CENTRAL: descent [%d] %f -> %f", i, g->base_x[i], p);
       __cudampi__updatePowerCap((float)vcap, i);  // helper clamps to limits
@@ -1127,9 +1174,13 @@ void __cudampi__initializeGradientOpt (double alpha, double eps) {
     double minv = __cudampi__devicePowerConfig[i].powercapRange.min;
     double maxv = __cudampi__devicePowerConfig[i].powercapRange.max;
     double pnow = __cudampi__cap_to_norm((double)__cudampi__devicePowerConfig[i].currentPowerCap, minv, maxv);
-    if (pnow < 0.0) pnow = 0.0; if (pnow > 1.0) pnow = 1.0;
+    pnow = __cudampi__clampNormForDevice(i, pnow);
     __cudampi__simpleGradientOpt.base_x[i]  = pnow;
+    __cudampi__simpleGradientOpt.x_plus[i]  = pnow;
+    __cudampi__simpleGradientOpt.x_minus[i] = pnow;
     __cudampi__spsaGradientOpt.base_x[i]    = pnow;
+    __cudampi__spsaGradientOpt.x_plus[i]    = pnow;
+    __cudampi__spsaGradientOpt.x_minus[i]   = pnow;
     __cudampi__spsaAdaptiveOpt.base_x[i]    = pnow;
     __cudampi__spsaAdaptiveOpt.m[i] = 0.0;
     __cudampi__spsaAdaptiveOpt.v[i] = 0.0;
@@ -1158,6 +1209,8 @@ void __cudampi__loadAndLogPowercapConfig(void) {
       __cudampi__gradient_opt_eps = file_config.gradient_opt_eps;
       __cudampi__epsilon_decay = file_config.epsilon_decay;
       __cudampi__edp_optimization_steps = file_config.edp_optimization_steps;
+      __cudampi__cpu_min_powercap = file_config.cpu_min_powercap > 0.0f ? file_config.cpu_min_powercap : 0.10f;
+      __cudampi__gpu_min_powercap = file_config.gpu_min_powercap > 0.0f ? file_config.gpu_min_powercap : 0.10f;
     }
     __cudampi__cpu_time_window_us = file_config.cpu_time_window_us;
     // Apply global powercap from config if provided (> 0)
@@ -1198,16 +1251,19 @@ void __cudampi__loadAndLogPowercapConfig(void) {
     case EDP_GRADIENT_SIMPLE:
       log_message(LOG_INFO, "Powercap strategy: EDP_GRADIENT_SIMPLE");
       log_message(LOG_INFO, "Gradient params: start_alpha=%f, alpha_decay=%f, eps=%f", __cudampi__gradient_start_alpha, __cudampi__gradient_alpha_decay, __cudampi__gradient_opt_eps);
+      log_message(LOG_INFO, "Dynamic lower bounds: cpu_min_powercap=%f gpu_min_powercap=%f", __cudampi__cpu_min_powercap, __cudampi__gpu_min_powercap);
       log_message(LOG_INFO, "EDP optimisation steps limit: %llu (0=unlimited)", __cudampi__edp_optimization_steps);
       break;
     case EDP_GRADIENT_SPSA:
       log_message(LOG_INFO, "Powercap strategy: EDP_GRADIENT_SPSA");
       log_message(LOG_INFO, "Gradient params: start_alpha=%f, alpha_decay=%f, eps=%f", __cudampi__gradient_start_alpha, __cudampi__gradient_alpha_decay, __cudampi__gradient_opt_eps);
+      log_message(LOG_INFO, "Dynamic lower bounds: cpu_min_powercap=%f gpu_min_powercap=%f", __cudampi__cpu_min_powercap, __cudampi__gpu_min_powercap);
       log_message(LOG_INFO, "EDP optimisation steps limit: %llu (0=unlimited)", __cudampi__edp_optimization_steps);
       break;
     case EDP_GRADIENT_CMAES:
       log_message(LOG_INFO, "Powercap strategy: EDP_GRADIENT_CMAES (CMA-ES)");
       log_message(LOG_INFO, "CMA-ES params: start_powercap=%f, sigma0~eps=%f", __cudampi__gradient_opt_start_powercap, __cudampi__gradient_opt_eps);
+      log_message(LOG_INFO, "Dynamic lower bounds: cpu_min_powercap=%f gpu_min_powercap=%f", __cudampi__cpu_min_powercap, __cudampi__gpu_min_powercap);
       log_message(LOG_INFO, "EDP optimisation steps limit: %llu (0=unlimited)", __cudampi__edp_optimization_steps);
       break;
     default:
@@ -1250,6 +1306,7 @@ void __cudampi__allocAndGatherPowercapRanges(void) {
 void __cudampi__initDevicePowercapConfig(void) {
   for (int i = 0; i < __cudampi_totaldevicecount; i++) {
     __cudampi__devicePowerConfig[i].currentPower = -1; // initial value
+    __cudampi__devicePowerConfig[i].currentEnergy = -1.0f;
     __cudampi__devicePowerConfig[i].deviceEnabled = 1;
 
     const int rank = __cudampi_targetMPIrankfordevice[i];
@@ -1286,7 +1343,7 @@ static void __cudampi__initCmaes(void) {
   for (int i = 0; i < g->n; ++i) {
     g->phys_minv[i] = __cudampi__devicePowerConfig[i].powercapRange.min;
     g->phys_maxv[i] = __cudampi__devicePowerConfig[i].powercapRange.max;
-    g->minv[i] = 0.0;
+    g->minv[i] = __cudampi__deviceLowerNorm(i);
     g->maxv[i] = 1.0;
     // Use user-provided epsilon directly in normalized space as CMA-ES initial stddev
     double eps_norm = (__cudampi__gradient_opt_eps > 0 ? __cudampi__gradient_opt_eps : 0.1);
@@ -1297,7 +1354,7 @@ static void __cudampi__initCmaes(void) {
   cmaes_boundary_transformation_init(&g->bounds, g->minv, g->maxv, g->n);
   for (int i = 0; i < g->n; ++i) {
     double cap = (double)__cudampi__devicePowerConfig[i].currentPowerCap;
-    g->x_in_bounds[i] = __cudampi__cap_to_norm(cap, g->phys_minv[i], g->phys_maxv[i]);
+    g->x_in_bounds[i] = __cudampi__clampNormForDevice(i, __cudampi__cap_to_norm(cap, g->phys_minv[i], g->phys_maxv[i]));
   }
   cmaes_boundary_transformation_inverse(&g->bounds, g->x_in_bounds, xstart, g->n);
   cmaes_init(&g->evo, g->n, xstart, stddev, 0, g->lambda, "cmaes_initials.par");
@@ -1320,10 +1377,15 @@ void __cudampi__applyInitialPowercapsForStrategy(void) {
   if (
       __cudampi__powercapStrategy == EQUAL_SPLIT) {
     for (int i = 0; i < __cudampi_totaldevicecount; i++) {
+      float startPowerCap = __cudampi__gradient_opt_start_powercap;
+      float lowerPowerCap = (float)__cudampi__deviceLowerNorm(i);
+      if (startPowerCap < lowerPowerCap) {
+        startPowerCap = lowerPowerCap;
+      }
       __cudampi__devicePowerConfig[i].currentPowerCap = getPowerCapFromRange(
         __cudampi__devicePowerConfig[i].powercapRange.min,
         __cudampi__devicePowerConfig[i].powercapRange.max,
-        __cudampi__gradient_opt_start_powercap);
+        startPowerCap);
     }
   }
 
@@ -1450,6 +1512,9 @@ void __cudampi__powercappingManagerStep(void) {
       __cudampi__powercapStrategy == EDP_GRADIENT_CMAES) {
     static unsigned long long edp_opt_iterations = 0ULL; // number of completed optimisation updates
     static int edp_opt_limit_logged = 0;                 // avoid spamming logs when limit reached
+    double combinedEnergy = 0.0;
+    int energyDevices = 0;
+    // TODO: Reintroduce stricter EDP sample validation/rejection once this path has settled.
     // log_message(LOG_INFO, "EDP Gradient Optimization: Checking if all devices have completed their last batch.");
     int allDevicesCompleted = 1;
     for (int i = 0; i < __cudampi_totaldevicecount; i++) {
@@ -1460,10 +1525,11 @@ void __cudampi__powercappingManagerStep(void) {
         omp_unset_lock(&(__cudampi__devicelocks[i]));
         break;
       }
-      combinedPower +=__cudampi__devicePowerConfig[i].currentPower;
-      // combinedDataPoints += (__cudampi__last_data_points_sent[i] - __cudampi__mgr_data_points_sent[i]); // replaced by estimate from t_per_dp
-      // Accumulate per-device time per data point if available
-      if (__cudampi__timePerDataPoint[i] > 0.0) {
+      if (__cudampi__devicePowerConfig[i].currentEnergy > 0.0f) {
+        combinedEnergy += __cudampi__devicePowerConfig[i].currentEnergy;
+        energyDevices++;
+      }
+      if (__cudampi__timePerDataPoint[i] > 0.0 && isfinite(__cudampi__timePerDataPoint[i])) {
         sumTimePerDataPoint += __cudampi__timePerDataPoint[i];
         sumRecipTimePerDataPoint += 1.0 / __cudampi__timePerDataPoint[i];
       }
@@ -1491,22 +1557,32 @@ void __cudampi__powercappingManagerStep(void) {
       __cudampi__optimizerSyncPeriod = period_sec;
       prev_sync_time = now;
 
-      // Calculate EDP based on combined power and total time
       // calculate edp per data point, but scale it by batch size to keep values in reasonable range
       // Estimate number of data points processed during this period using per-device t_per_dp
       // total_dp ~= period_sec * sum_i (1 / t_per_dp[i])
       double estimatedDataPointsD = period_sec * sumRecipTimePerDataPoint;
       if (estimatedDataPointsD < 0.0) estimatedDataPointsD = 0.0;
-      combinedDataPoints =  ((unsigned long long) llround(estimatedDataPointsD))/__cudampi__default_batch_size;
-      __cudampi__edp = (combinedPower * period_sec * period_sec) /
-                       (((double)combinedDataPoints) * ((double)combinedDataPoints));
+      if (__cudampi__default_batch_size > 0UL) {
+        combinedDataPoints =  ((unsigned long long) llround(estimatedDataPointsD))/__cudampi__default_batch_size;
+      }
+      if (combinedDataPoints == 0ULL) {
+        log_message(LOG_WARN, "EDP estimated batch denominator is zero (estimated_dp=%.3f). Using 1.", estimatedDataPointsD);
+        combinedDataPoints = 1ULL;
+      }
+      if (combinedEnergy > 0.0 && period_sec > 0.0) {
+        combinedPower = combinedEnergy / period_sec;
+      }
+      if (combinedEnergy > 0.0 && period_sec > 0.0) {
+        __cudampi__edp = (combinedEnergy * period_sec) /
+                         (((double)combinedDataPoints) * ((double)combinedDataPoints));
+      } else {
+        __cudampi__edp = 0.0;
+      }
       // Compute average time per data point across devices (seconds)
       log_message(LOG_INFO, "EDP Gradient Optimization: All devices have completed their last batch.");
-      log_message(LOG_INFO, "  Combined Power: %f W", combinedPower);
-      log_message(LOG_INFO, "  Time since last optimization step: %f s", period_sec);
-      log_message(LOG_INFO, "  Calculated EDP: %f J*s", combinedPower * period_sec);
-      log_message(LOG_INFO, "  Data points collected since last optimization step: %llu", combinedDataPoints);
-      log_message(LOG_INFO, "  EDP per batch: %f", __cudampi__edp);
+      log_message(LOG_INFO, "EDP sample: phase=%d period=%.6fs energy=%.3fJ avg_power=%.3fW est_batches=%llu edp=%.8f energy_devices=%d",
+                  __cudampi__powercapStrategy, period_sec, combinedEnergy, combinedPower,
+                  combinedDataPoints, __cudampi__edp, energyDevices);
       // If a limit is configured and already reached, stop further optimisation updates
       if (__cudampi__edp_optimization_steps > 0ULL && edp_opt_iterations >= __cudampi__edp_optimization_steps) {
         if (!edp_opt_limit_logged) {
