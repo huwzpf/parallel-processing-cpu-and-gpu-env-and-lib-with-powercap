@@ -31,7 +31,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OU
 // Another problem might be host memory used by MPI for sending data around
 // So looks like it's better to just execute multiple iterations on the same data
 // And don't risk running out of memory
-#define ITERS 150
+#define ITERS 50
 
 struct __cudampi__arguments_type __cudampi__arguments;
 

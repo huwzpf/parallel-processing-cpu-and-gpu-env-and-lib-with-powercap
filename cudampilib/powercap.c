@@ -1406,6 +1406,13 @@ void __cudampi__powercappingManagerStep(void) {
 
   if (!amimanager || __cudampi__powercapStrategy == DISABLED) return;
 
+  static unsigned long long managerExecutionCount = 0ULL;
+  unsigned long long currentManagerExecution = 0ULL;
+  #pragma omp atomic capture
+  currentManagerExecution = ++managerExecutionCount;
+  log_message(LOG_INFO, "Power capping manager execution #%llu on device %d with strategy %d",
+              currentManagerExecution, __cudampi__currentDevice, __cudampi__powercapStrategy);
+
   if (__cudampi__powercapStrategy == BINARY_GREEDY || __cudampi__powercapStrategy == EQUAL_SHARE_BINARY_GREEDY) {
     if (!selecteddevices) {
       if (__cudampi__powercapStrategy == EQUAL_SHARE_BINARY_GREEDY) {

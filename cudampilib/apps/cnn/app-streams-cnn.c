@@ -19,8 +19,8 @@ Runs multi-layer CNN forward pass on GPU; CPU path is disabled (no-op).
 #include "utility.h"
 
 // Repeat data ITERS times to simulate larger memory usage without allocating it all
-#define ITERS 150
-#define SYNC_PERIOD 2
+#define ITERS 50
+#define SYNC_PERIOD 1
 
 struct __cudampi__arguments_type __cudampi__arguments;
 

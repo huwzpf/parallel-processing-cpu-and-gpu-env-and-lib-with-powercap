@@ -6,8 +6,14 @@ import json
 
 from pathlib import Path
 from dataclasses import asdict
+from datetime import datetime
 
 from models import RunParameters, SingleRunResult, MultipleRunResult, ExperimentResult, Experiment
+
+
+def log(message: str):
+    timestamp = datetime.now().isoformat(timespec="seconds")
+    print(f"[{timestamp}] {message}")
 
 
 def get_arguments(run_parameters: RunParameters):
@@ -80,21 +86,21 @@ def single_app_run(run_parameters: RunParameters) -> SingleRunResult:
     write_powercap_conf(run_parameters)
     arguments = get_arguments(run_parameters=run_parameters)
     command = f"./run_scripts/run-app {run_parameters.app_name} B {run_parameters.number_od_nodes} {arguments}"
-    print(command)
+    log(command)
     try:
         result = subprocess.run(command.split(" "), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True, timeout=5000)
     except Exception as e:
         result = None
-        print(f"An error occurred while executing the command: {e}")
+        log(f"An error occurred while executing the command: {e}")
 
     if (result is None) or ("No devices found under the power limit" in result.stderr) or ("Main elapsed time" not in result.stderr):
-        print("Error encountered when launching application")
+        log("Error encountered when launching application")
         try:
             time.sleep(10)
             result = subprocess.run(command.split(" "), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True, timeout=5000)
         except Exception as e:
             result = None
-            print(f"An error occurred while executing the command: {e}")
+            log(f"An error occurred while executing the command: {e}")
     
     if "No devices found under the power limit" in result.stderr:
         return -1
