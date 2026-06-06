@@ -5,6 +5,10 @@
 *.json
 *.png
 *.conf
+.codex
+.claude
+c-cmaes
+build
 /python_scripts/__pycache__/
 /python_scripts/venv/
 actparcmaes.par
