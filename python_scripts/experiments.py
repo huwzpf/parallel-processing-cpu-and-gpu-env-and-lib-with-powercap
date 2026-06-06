@@ -24,7 +24,10 @@ def get_arguments(run_parameters: RunParameters):
     initial_cpu_batch_size_scaling = str(run_parameters.initial_cpu_batch_size_scaling) if run_parameters.initial_cpu_batch_size_scaling else "0"
     # Note: cpu_min_powercap and gpu_min_powercap are now configured via powercap.conf
     # Powercap is now configured via powercap.conf (global_powercap)
-    return f"--cpu-enabled={cpu_enabled_arg} --number-of-streams={number_of_streams_arg} --batch-size={batch_size_arg} --cpu-power-scaling={cpu_power_scaling_arg} --initial-cpu-batch-size-scaling={initial_cpu_batch_size_scaling}"
+    args = f"--cpu-enabled={cpu_enabled_arg} --number-of-streams={number_of_streams_arg} --batch-size={batch_size_arg} --cpu-power-scaling={cpu_power_scaling_arg} --initial-cpu-batch-size-scaling={initial_cpu_batch_size_scaling}"
+    if run_parameters.iters is not None:
+        args += f" --iters={run_parameters.iters}"
+    return args
 
 
 def write_powercap_conf(run_parameters: RunParameters, config_path: str = "powercap.conf"):
@@ -68,12 +71,14 @@ def write_powercap_conf(run_parameters: RunParameters, config_path: str = "power
     epsilon_decay = run_parameters.epsilon_decay if run_parameters.epsilon_decay is not None else 0.99
     gradient_opt_eps = run_parameters.gradient_opt_eps if run_parameters.gradient_opt_eps is not None else 5.0
     edp_optimization_steps = run_parameters.edp_optimization_steps if run_parameters.edp_optimization_steps is not None else 0
+    optimizer_step_interval = run_parameters.optimizer_step_interval if run_parameters.optimizer_step_interval is not None else 1
 
     lines.append(f"start_alpha={start_alpha}")
     lines.append(f"alpha_decay={alpha_decay}")
     lines.append(f"epsilon_decay={epsilon_decay}")
     lines.append(f"gradient_opt_eps={gradient_opt_eps}")
     lines.append(f"edp_optimization_steps={edp_optimization_steps}")
+    lines.append(f"optimizer_step_interval={optimizer_step_interval}")
 
     with open(config_path, "w") as f:
         f.write("\n".join(lines) + "\n")

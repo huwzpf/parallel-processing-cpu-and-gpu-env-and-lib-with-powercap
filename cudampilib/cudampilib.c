@@ -55,6 +55,7 @@ static struct argp_option options[] = {
   { "cpu-power-scaling",                 's',  "SCALING FACTOR",    0, "Set the CPU power scaling factor" },
   { "initial-cpu-batch-size-scaling",    'f',  "SCALING FACTOR",    0, "Set initial scaling factor for CPU batch size (0 to disable)" },
   { "disable-dynamic-cpu-batch-scaling",  0,    0,                  0, "Disable dynamic CPU batch size scaling" },
+  { "iters",                             'i',  "N",                 0, "Dataset iteration count (0 = app compile-time default)" },
   { 0 }
 };
 
@@ -335,6 +336,9 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state)
     case 'y':
       arguments->gpu_min_powercap = atof(arg);
       break;
+    case 'i':
+      arguments->iters = atoll(arg);
+      break;
     default:
       return ARGP_ERR_UNKNOWN;
     }
@@ -523,6 +527,7 @@ void __cudampi__initializeMPI(int argc, char **argv) {
   __cudampi__arguments.cpu_power_scaling = 0.0;
   __cudampi__arguments.cpu_batch_scaling_factor = 0;
   __cudampi__arguments.use_dynamic_scaling = 1;
+  __cudampi__arguments.iters = 0;
 
   /* Parse our arguments; every option seen by parse_opt will be reflected in arguments. */
   argp_parse(&argp, argc, argv, 0, 0, &__cudampi__arguments);
@@ -539,6 +544,7 @@ void __cudampi__initializeMPI(int argc, char **argv) {
   log_message(LOG_INFO, "CPU Power Scaling                          : %f",   __cudampi__arguments.cpu_power_scaling);
   log_message(LOG_INFO, "Initial Cpu Batch Size Scaling Factor      : %d",   __cudampi__arguments.cpu_batch_scaling_factor);
   log_message(LOG_INFO, "Dynamic CPU Batch Size Scaling Enabled     : %d",   __cudampi__arguments.use_dynamic_scaling);
+  log_message(LOG_INFO, "Iters                                      : %lld", __cudampi__arguments.iters);
 
   __cudampi__dyanmicCpuBatchSizeScalingEnabled = __cudampi__arguments.use_dynamic_scaling;
   __cudampi__cpu_enabled = __cudampi__arguments.cpu_enabled;

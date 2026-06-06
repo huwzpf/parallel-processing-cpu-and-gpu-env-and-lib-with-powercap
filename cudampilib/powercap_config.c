@@ -31,6 +31,8 @@ int load_powercap_config(const char *path, powercap_config_t *config) {
     config->cpu_time_window_us = 1000000ULL;
     // Default: unlimited EDP optimisation steps
     config->edp_optimization_steps = 0ULL;
+    // Default: one optimizer step per sync window
+    config->optimizer_step_interval = 1ULL;
 
     FILE *f = fopen(path, "r");
     if (!f) {
@@ -89,6 +91,10 @@ int load_powercap_config(const char *path, powercap_config_t *config) {
             } else if (strcmp(key, "edp_optimization_steps") == 0) {
                 // number of dynamic optimisation updates (0 means unlimited)
                 config->edp_optimization_steps = (unsigned long long)strtoull(value, NULL, 10);
+            } else if (strcmp(key, "optimizer_step_interval") == 0) {
+                // windows to aggregate per optimizer step (min 1)
+                config->optimizer_step_interval = (unsigned long long)strtoull(value, NULL, 10);
+                if (config->optimizer_step_interval < 1) config->optimizer_step_interval = 1;
             }
             // Unknown keys are ignored to keep parser extendable
         }

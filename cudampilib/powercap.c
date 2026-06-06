@@ -41,6 +41,8 @@ float __cudampi__gradient_opt_start_powercap = 1.0;
 unsigned long long __cudampi__cpu_time_window_us = 1000000ULL; // default 1s
 // Limit number of dynamic optimisation updates (0 = unlimited)
 unsigned long long __cudampi__edp_optimization_steps = 0ULL;
+// Number of sync windows to aggregate before each optimizer step (default 1)
+unsigned long long __cudampi__optimizer_step_interval = 1ULL;
 
 // Gradient optimisation runtime parameters (configurable via powercap.conf)
 float __cudampi__gradient_start_alpha = 2.0f;
@@ -1209,6 +1211,7 @@ void __cudampi__loadAndLogPowercapConfig(void) {
       __cudampi__gradient_opt_eps = file_config.gradient_opt_eps;
       __cudampi__epsilon_decay = file_config.epsilon_decay;
       __cudampi__edp_optimization_steps = file_config.edp_optimization_steps;
+      __cudampi__optimizer_step_interval = file_config.optimizer_step_interval > 0 ? file_config.optimizer_step_interval : 1ULL;
       __cudampi__cpu_min_powercap = file_config.cpu_min_powercap > 0.0f ? file_config.cpu_min_powercap : 0.10f;
       __cudampi__gpu_min_powercap = file_config.gpu_min_powercap > 0.0f ? file_config.gpu_min_powercap : 0.10f;
     }
@@ -1512,6 +1515,9 @@ void __cudampi__powercappingManagerStep(void) {
       __cudampi__powercapStrategy == EDP_GRADIENT_CMAES) {
     static unsigned long long edp_opt_iterations = 0ULL; // number of completed optimisation updates
     static int edp_opt_limit_logged = 0;                 // avoid spamming logs when limit reached
+    static unsigned long long edp_window_count = 0ULL;   // total sync windows seen
+    static unsigned long long acc_count = 0ULL;          // windows accumulated since last optimizer step
+    static double acc_edp = 0.0;                         // sum of per-window EDP values
     double combinedEnergy = 0.0;
     int energyDevices = 0;
     // TODO: Reintroduce stricter EDP sample validation/rejection once this path has settled.
@@ -1536,53 +1542,79 @@ void __cudampi__powercappingManagerStep(void) {
       omp_unset_lock(&(__cudampi__devicelocks[i]));
     }
 
-    if(allDevicesCompleted) {
-      // Measure time between optimizer syncs. For the first sync, use app start time
-      struct timeval now;
-      gettimeofday(&now, NULL);
-      double period_sec = 0.0;
-      if (!first_sync_done) {
-        if (__cudampi__appStartTimestampSet) {
-          period_sec = (double)(now.tv_sec - __cudampi__appStartTime.tv_sec)
-                     + (double)(now.tv_usec - __cudampi__appStartTime.tv_usec) / 1000000.0;
-          first_sync_done = 1;
-        } else {
-          log_message(LOG_ERROR, "App start time not set, cannot measure first optimizer sync period.");
-          period_sec = 0.0;
-        }
+    if(!allDevicesCompleted) {
+      // log_message(LOG_INFO, "Not all devices have completed their last batch. Skipping optimization.");
+      return;
+    }
+    // Measure time between optimizer syncs. For the first sync, use app start time
+    struct timeval now;
+    gettimeofday(&now, NULL);
+    double period_sec = 0.0;
+    if (!first_sync_done) {
+      if (__cudampi__appStartTimestampSet) {
+        period_sec = (double)(now.tv_sec - __cudampi__appStartTime.tv_sec)
+                    + (double)(now.tv_usec - __cudampi__appStartTime.tv_usec) / 1000000.0;
+        first_sync_done = 1;
       } else {
-        period_sec = (double)(now.tv_sec - prev_sync_time.tv_sec)
-                   + (double)(now.tv_usec - prev_sync_time.tv_usec) / 1000000.0;
+        log_message(LOG_ERROR, "App start time not set, cannot measure first optimizer sync period.");
+        period_sec = 0.0;
       }
-      __cudampi__optimizerSyncPeriod = period_sec;
-      prev_sync_time = now;
+    } else {
+      period_sec = (double)(now.tv_sec - prev_sync_time.tv_sec)
+                  + (double)(now.tv_usec - prev_sync_time.tv_usec) / 1000000.0;
+    }
+    __cudampi__optimizerSyncPeriod = period_sec;
+    prev_sync_time = now;
 
-      // calculate edp per data point, but scale it by batch size to keep values in reasonable range
-      // Estimate number of data points processed during this period using per-device t_per_dp
-      // total_dp ~= period_sec * sum_i (1 / t_per_dp[i])
-      double estimatedDataPointsD = period_sec * sumRecipTimePerDataPoint;
-      if (estimatedDataPointsD < 0.0) estimatedDataPointsD = 0.0;
-      if (__cudampi__default_batch_size > 0UL) {
-        combinedDataPoints =  ((unsigned long long) llround(estimatedDataPointsD))/__cudampi__default_batch_size;
+    // calculate edp per data point, but scale it by batch size to keep values in reasonable range
+    // Estimate number of data points processed during this period using per-device t_per_dp
+    // total_dp ~= period_sec * sum_i (1 / t_per_dp[i])
+    double estimatedDataPointsD = period_sec * sumRecipTimePerDataPoint;
+    if (estimatedDataPointsD < 0.0) estimatedDataPointsD = 0.0;
+    if (__cudampi__default_batch_size > 0UL) {
+      combinedDataPoints =  ((unsigned long long) llround(estimatedDataPointsD))/__cudampi__default_batch_size;
+    }
+    if (combinedDataPoints == 0ULL) {
+      log_message(LOG_WARN, "EDP estimated batch denominator is zero (estimated_dp=%.3f). Using 1.", estimatedDataPointsD);
+      combinedDataPoints = 1ULL;
+    }
+    if (combinedEnergy > 0.0 && period_sec > 0.0) {
+      combinedPower = combinedEnergy / period_sec;
+    }
+    if (combinedEnergy > 0.0 && period_sec > 0.0) {
+      __cudampi__edp = (combinedEnergy * period_sec) /
+                        (((double)combinedDataPoints) * ((double)combinedDataPoints));
+    } else {
+      __cudampi__edp = 0.0;
+    }
+    edp_window_count++;
+
+    // Structured per-window EDP sample for SNR analysis (always emitted)
+    {
+      char cap_str[1024] = "";
+      int cap_pos = 0;
+      for (int i = 0; i < __cudampi_totaldevicecount && cap_pos < (int)sizeof(cap_str) - 16; i++) {
+        double minv = __cudampi__devicePowerConfig[i].powercapRange.min;
+        double maxv = __cudampi__devicePowerConfig[i].powercapRange.max;
+        double norm = (maxv > minv) ? (__cudampi__devicePowerConfig[i].currentPowerCap - minv) / (maxv - minv) : 0.0;
+        cap_pos += snprintf(cap_str + cap_pos, sizeof(cap_str) - cap_pos, "%s%.4f", i ? "," : "", norm);
       }
-      if (combinedDataPoints == 0ULL) {
-        log_message(LOG_WARN, "EDP estimated batch denominator is zero (estimated_dp=%.3f). Using 1.", estimatedDataPointsD);
-        combinedDataPoints = 1ULL;
-      }
-      if (combinedEnergy > 0.0 && period_sec > 0.0) {
-        combinedPower = combinedEnergy / period_sec;
-      }
-      if (combinedEnergy > 0.0 && period_sec > 0.0) {
-        __cudampi__edp = (combinedEnergy * period_sec) /
-                         (((double)combinedDataPoints) * ((double)combinedDataPoints));
-      } else {
-        __cudampi__edp = 0.0;
-      }
-      // Compute average time per data point across devices (seconds)
-      log_message(LOG_INFO, "EDP Gradient Optimization: All devices have completed their last batch.");
-      log_message(LOG_INFO, "EDP sample: phase=%d period=%.6fs energy=%.3fJ avg_power=%.3fW est_batches=%llu edp=%.8f energy_devices=%d",
-                  __cudampi__powercapStrategy, period_sec, combinedEnergy, combinedPower,
-                  combinedDataPoints, __cudampi__edp, energyDevices);
+      log_message(LOG_INFO, "[EDP_SAMPLE] window=%llu interval=%llu phase=%d energy_J=%.3f period_s=%.6f batches=%llu edp=%.8f avg_power=%.3fW energy_devices=%d cap=%s",
+                  edp_window_count, __cudampi__optimizer_step_interval, __cudampi__powercapStrategy,
+                  combinedEnergy, period_sec, combinedDataPoints, __cudampi__edp,
+                  combinedPower, energyDevices, cap_str);
+    }
+
+    // Accumulate EDP for N-window averaging before optimizer step
+    acc_edp += __cudampi__edp;
+    acc_count++;
+
+    // Only trigger optimizer every optimizer_step_interval windows
+    if (acc_count >= __cudampi__optimizer_step_interval) {
+      // Use mean EDP across accumulated windows as the optimizer input
+      __cudampi__edp = acc_edp / (double)acc_count;
+      acc_edp = 0.0; acc_count = 0ULL;
+
       // If a limit is configured and already reached, stop further optimisation updates
       if (__cudampi__edp_optimization_steps > 0ULL && edp_opt_iterations >= __cudampi__edp_optimization_steps) {
         if (!edp_opt_limit_logged) {
@@ -1629,14 +1661,13 @@ void __cudampi__powercappingManagerStep(void) {
           __cudampi__grad_update_performed = 0;
         }
       }
-      for (int i = 0; i < __cudampi_totaldevicecount; i++) {
-        omp_set_lock(&(__cudampi__devicelocks[i]));
-        __cudampi__mgr_batches_sent[i] = __cudampi__last_batches_sent[i];
-        __cudampi__mgr_data_points_sent[i] = __cudampi__last_data_points_sent[i];
-        omp_unset_lock(&(__cudampi__devicelocks[i]));
-      }
-    } else {
-      // log_message(LOG_INFO, "Not all devices have completed their last batch. Skipping optimization.");
     }
-  }
+
+    for (int i = 0; i < __cudampi_totaldevicecount; i++) {
+      omp_set_lock(&(__cudampi__devicelocks[i]));
+      __cudampi__mgr_batches_sent[i] = __cudampi__last_batches_sent[i];
+      __cudampi__mgr_data_points_sent[i] = __cudampi__last_data_points_sent[i];
+      omp_unset_lock(&(__cudampi__devicelocks[i]));
+    }
+  } 
 }

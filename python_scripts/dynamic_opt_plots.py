@@ -232,12 +232,12 @@ dynamic_trajectories_plot (
 
 
 
-exp_cnn_equal = ExperimentResult.from_file('/home/macierz/s184297/parallel-processing-cpu-and-gpu-env-and-lib-with-powercap/cudampilib/new_equal_cnn_powercap_8_nodes.json')
-exp_cnn_best = ExperimentResult.from_file('/home/macierz/s184297/parallel-processing-cpu-and-gpu-env-and-lib-with-powercap/cudampilib/new_best_dynamic_cnn_powercap_8_nodes.json')
+exp_cnn_equal = ExperimentResult.from_file('/home/macierz/s184297/parallel-processing-cpu-and-gpu-env-and-lib-with-powercap/cudampilib/20_new_equal_cnn_powercap_8_nodes.json')
+exp_cnn_best = ExperimentResult.from_file('/home/macierz/s184297/parallel-processing-cpu-and-gpu-env-and-lib-with-powercap/cudampilib/20_new_best_dynamic_cnn_powercap_8_nodes.json')
 
 
-exp_rnn_equal = ExperimentResult.from_file('/home/macierz/s184297/parallel-processing-cpu-and-gpu-env-and-lib-with-powercap/cudampilib/new_equal_rnn_powercap_8_nodes.json')
-exp_rnn_best = ExperimentResult.from_file('/home/macierz/s184297/parallel-processing-cpu-and-gpu-env-and-lib-with-powercap/cudampilib/new_best_dynamic_rnn_powercap_8_nodes.json')
+exp_rnn_equal = ExperimentResult.from_file('/home/macierz/s184297/parallel-processing-cpu-and-gpu-env-and-lib-with-powercap/cudampilib/20_new_equal_rnn_powercap_8_nodes.json')
+exp_rnn_best = ExperimentResult.from_file('/home/macierz/s184297/parallel-processing-cpu-and-gpu-env-and-lib-with-powercap/cudampilib/20_new_best_dynamic_rnn_powercap_8_nodes.json')
 
 
 

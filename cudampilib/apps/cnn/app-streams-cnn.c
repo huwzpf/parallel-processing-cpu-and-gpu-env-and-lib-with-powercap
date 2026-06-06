@@ -18,13 +18,13 @@ Runs multi-layer CNN forward pass on GPU; CPU path is disabled (no-op).
 #define ENABLE_OUTPUT_LOGS
 #include "utility.h"
 
-// Repeat data ITERS times to simulate larger memory usage without allocating it all
-#define ITERS 50
 #define SYNC_PERIOD 1
 
 struct __cudampi__arguments_type __cudampi__arguments;
 
 long long VECTORSIZE;
+// Repeat data iters times to simulate larger memory usage without allocating it all
+long long iters;
 
 float *vectora; // inputs [VECTORSIZE, INPUT_BATCH_SIZE]
 float *vectorb; // inputs [VECTORSIZE, INPUT_BATCH_SIZE]
@@ -83,6 +83,7 @@ int main(int argc, char **argv)
   streamcount = __cudampi__arguments.number_of_streams;
   batchsize = __cudampi__arguments.batch_size;
   VECTORSIZE = CNN_VECTORSIZE;
+  iters = (__cudampi__arguments.iters > 0) ? __cudampi__arguments.iters : 50LL;
 
   int alldevicescount = 0;
   __cudampi__getDeviceCount(&alldevicescount);
@@ -168,8 +169,8 @@ int main(int argc, char **argv)
       }
 
       do {
-        batch_pointer = __cudampi__getnextchunkindex(&globalcounter1, ITERS * VECTORSIZE);
-        if (batch_pointer.start >= ITERS * VECTORSIZE) {
+        batch_pointer = __cudampi__getnextchunkindex(&globalcounter1, iters * VECTORSIZE);
+        if (batch_pointer.start >= iters * VECTORSIZE) {
           finish = 1;
         } else {
           batch_pointer.start = batch_pointer.start % (VECTORSIZE - batchsize);
@@ -179,8 +180,8 @@ int main(int argc, char **argv)
           __cudampi__memcpyAsync(vectorb + (batch_pointer.start * INPUT_BATCH_SIZE), devPtrb, batch_pointer.n_elements * INPUT_BATCH_SIZE * sizeof(float), cudaMemcpyDeviceToHost, stream);
 
           if (streamcount == 2) {
-            batch_pointer = __cudampi__getnextchunkindex(&globalcounter1, ITERS * VECTORSIZE);
-            if (batch_pointer.start >= ITERS * VECTORSIZE) {
+            batch_pointer = __cudampi__getnextchunkindex(&globalcounter1, iters * VECTORSIZE);
+            if (batch_pointer.start >= iters * VECTORSIZE) {
               finish = 1;
             } else {
               batch_pointer.start = batch_pointer.start % (VECTORSIZE - batchsize);
@@ -276,8 +277,8 @@ int main(int argc, char **argv)
       }
 
       do {
-        batch_pointer = __cudampi__getnextchunkindex(&globalcounter2, ITERS * VECTORSIZE);
-        if (batch_pointer.start >= ITERS * VECTORSIZE) {
+        batch_pointer = __cudampi__getnextchunkindex(&globalcounter2, iters * VECTORSIZE);
+        if (batch_pointer.start >= iters * VECTORSIZE) {
           finish = 1;
         } else {  
           waitForDataPoints(batch_pointer.n_elements);
@@ -304,8 +305,8 @@ int main(int argc, char **argv)
 
           if (streamcount == 2) {
             // Schedule second chunk to stream2
-            batch_pointer = __cudampi__getnextchunkindex(&globalcounter2, ITERS * VECTORSIZE);
-            if (batch_pointer.start >= ITERS * VECTORSIZE) {
+            batch_pointer = __cudampi__getnextchunkindex(&globalcounter2, iters * VECTORSIZE);
+            if (batch_pointer.start >= iters * VECTORSIZE) {
               finish = 1;
             } else {
               waitForDataPoints(batch_pointer.n_elements);

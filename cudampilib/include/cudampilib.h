@@ -43,6 +43,7 @@ struct __cudampi__arguments_type
   int use_dynamic_scaling;
   float gpu_min_powercap;
   float cpu_min_powercap;
+  long long iters;  // dataset iteration count (0 = app compile-time default)
 };
 
 typedef struct

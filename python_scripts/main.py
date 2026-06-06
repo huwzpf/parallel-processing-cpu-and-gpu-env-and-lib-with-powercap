@@ -324,10 +324,10 @@ def experiment_time_batch_size(description: str, app_name: str, file_path: str |
 
 
 if __name__ == "__main__":
-    experiment_equal_split(description="equal_powercap", app_name="cnn", file_path="new_equal_cnn_powercap_8_nodes.json", number_od_nodes=8, batch_size=100, cpu_power_scaling=0, cpu_enabled=True)
-    experiment_best_dynamic(description="best_dynamic_powercap", app_name="cnn", file_path="new_best_dynamic_cnn_powercap_8_nodes.json", number_od_nodes=8, batch_size=100, cpu_power_scaling=0, cpu_enabled=True)
-    experiment_equal_split(description="equal_powercap", app_name="rnn", file_path="new_equal_rnn_powercap_8_nodes.json", number_od_nodes=8, batch_size=100, cpu_power_scaling=0, cpu_enabled=True)
-    experiment_best_dynamic(description="best_dynamic_powercap", app_name="rnn", file_path="new_best_dynamic_rnn_powercap_8_nodes.json", number_od_nodes=8, batch_size=100, cpu_power_scaling=0, cpu_enabled=True)
+    experiment_equal_split(description="equal_powercap", app_name="cnn", file_path="20_new_equal_cnn_powercap_8_nodes.json", number_od_nodes=8, batch_size=20, cpu_power_scaling=0, cpu_enabled=True)
+    experiment_best_dynamic(description="best_dynamic_powercap", app_name="cnn", file_path="20_new_best_dynamic_cnn_powercap_8_nodes.json", number_od_nodes=8, batch_size=20, cpu_power_scaling=0, cpu_enabled=True)
+    experiment_equal_split(description="equal_powercap", app_name="rnn", file_path="20_new_equal_rnn_powercap_8_nodes.json", number_od_nodes=8, batch_size=20, cpu_power_scaling=0, cpu_enabled=True)
+    experiment_best_dynamic(description="best_dynamic_powercap", app_name="rnn", file_path="20_new_best_dynamic_rnn_powercap_8_nodes.json", number_od_nodes=8, batch_size=20, cpu_power_scaling=0, cpu_enabled=True)
     
 
     

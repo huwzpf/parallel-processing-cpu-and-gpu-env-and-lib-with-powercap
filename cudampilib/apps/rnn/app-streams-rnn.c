@@ -25,17 +25,16 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OU
 #define ENABLE_OUTPUT_LOGS
 #include "utility.h"
 
+struct __cudampi__arguments_type __cudampi__arguments;
+
+long long VECTORSIZE;
 // For VECTORSIZE = 20000 this application uses 24.5 GB of host memory
 // Just to hold input and output data
 // By scaling it 30x, we get accurate benchmark results that would need 250 GB
 // Another problem might be host memory used by MPI for sending data around
 // So looks like it's better to just execute multiple iterations on the same data
 // And don't risk running out of memory
-#define ITERS 50
-
-struct __cudampi__arguments_type __cudampi__arguments;
-
-long long VECTORSIZE;
+long long iters;
 
 double *vectora;
 double *vectorc;
@@ -63,6 +62,7 @@ int main(int argc, char **argv)
   streamcount = __cudampi__arguments.number_of_streams;
   batchsize = __cudampi__arguments.batch_size;
   VECTORSIZE = RNN_VECTORSIZE;
+  iters = (__cudampi__arguments.iters > 0) ? __cudampi__arguments.iters : 50LL;
 
   assert(RNN_HIDDEN_SIZE >= RNN_INPUT_SIZE && RNN_HIDDEN_SIZE >= RNN_OUTPUT_SIZE);
 
@@ -216,15 +216,15 @@ int main(int argc, char **argv)
 
     do 
     {
-      batch_pointer = __cudampi__getnextchunkindex(&globalcounter, ITERS * VECTORSIZE);
+      batch_pointer = __cudampi__getnextchunkindex(&globalcounter, iters * VECTORSIZE);
 
-      if (batch_pointer.start >= ITERS * VECTORSIZE) 
+      if (batch_pointer.start >= iters * VECTORSIZE) 
       {
         finish = 1;
       }
       else 
       {
-        // "Simulate" larger memory size by counting all the way to ITERS * VECTORSIZE (while only VECTORSIZE will fit into RAM)
+        // "Simulate" larger memory size by counting all the way to iters * VECTORSIZE (while only VECTORSIZE will fit into RAM)
         // (VECTORSIZE - batchsize) is largest value that batch_pointer.start can safely take (as n_elements <= batchsize)
         batch_pointer.start = batch_pointer.start % (VECTORSIZE - batchsize);
         //log_message(LOG_INFO, "[Thread %d] Sending chunk %ld with elements %ld (%ld , %ld), devPtr=%lld", omp_get_thread_num(), batch_pointer.start, batch_pointer.n_elements, (batch_pointer.start * INPUT_BATCH_SIZE), batch_pointer.n_elements * INPUT_BATCH_SIZE, devPtr);
@@ -235,15 +235,15 @@ int main(int argc, char **argv)
 
         if (streamcount == 2) 
         {
-          batch_pointer = __cudampi__getnextchunkindex(&globalcounter, ITERS * VECTORSIZE);
+          batch_pointer = __cudampi__getnextchunkindex(&globalcounter, iters * VECTORSIZE);
 
-          if (batch_pointer.start >= ITERS * VECTORSIZE) 
+          if (batch_pointer.start >= iters * VECTORSIZE) 
           {
             finish = 1;
           } 
           else 
           {
-            // "Simulate" larger memory size by counting all the way to ITERS * VECTORSIZE (while only VECTORSIZE will fit into RAM)
+            // "Simulate" larger memory size by counting all the way to iters * VECTORSIZE (while only VECTORSIZE will fit into RAM)
             // (VECTORSIZE - batchsize) is largest value that batch_pointer.start can safely take (as n_elements <= batchsize)
             batch_pointer.start = batch_pointer.start % (VECTORSIZE - batchsize);
             //log_message(LOG_INFO, "[Thread %d] Sending chunk %ld with elements %ld (%ld , %ld), devPtr=%lld", omp_get_thread_num(), batch_pointer.start, batch_pointer.n_elements, (batch_pointer.start * INPUT_BATCH_SIZE), batch_pointer.n_elements * INPUT_BATCH_SIZE, devPtr2);

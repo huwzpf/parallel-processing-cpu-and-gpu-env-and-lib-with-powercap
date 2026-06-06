@@ -20,6 +20,8 @@ typedef struct {
     unsigned long long cpu_time_window_us; // CPU power cap time window (microseconds)
     // Limit the number of dynamic optimisation updates (0 = unlimited)
     unsigned long long edp_optimization_steps;
+    // Number of sync windows to aggregate before each optimizer step (default 1)
+    unsigned long long optimizer_step_interval;
 } powercap_config_t;
 
 // Loads configuration from a simple key=value file.

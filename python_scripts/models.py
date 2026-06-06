@@ -52,6 +52,10 @@ class RunParameters:
     gradient_opt_eps: float | None = None
     # Limit number of dynamic optimisation updates (0 = unlimited)
     edp_optimization_steps: int | None = None
+    # Dataset iteration count passed as --iters (None = app compile-time default of 50)
+    iters: int | None = None
+    # Windows to aggregate per optimizer step (None = 1, i.e. every window)
+    optimizer_step_interval: int | None = None
 
 
 @dataclass
