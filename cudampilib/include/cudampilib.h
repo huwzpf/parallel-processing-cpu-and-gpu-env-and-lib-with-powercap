@@ -28,7 +28,10 @@ typedef enum {
   EQUAL_SHARE_BINARY_GREEDY,
   EDP_GRADIENT_SIMPLE,
   EDP_GRADIENT_SPSA,
-  EDP_GRADIENT_CMAES
+  EDP_GRADIENT_CMAES,
+  // Behaves like EQUAL_SPLIT (fixed equal caps) but runs the power capping
+  // manager every sync window to measure and log EDP samples without optimizing.
+  EQUAL_SPLIT_EDP_MONITOR
 } powercapStrategy_t;
 
 extern __global__ void kernel(long *devPtr);

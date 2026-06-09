@@ -1109,7 +1109,7 @@ cudaError_t __cudampi__deviceSynchronize(void) {
     }
 
     if (__cudampi__devicePowerConfig[__cudampi__currentDevice].currentEnergy > 0.0f) {
-      log_message(LOG_INFO, "Device energy: device=%d type=%s energy=%.3fJ avg_power=%.3fW",
+      log_message(LOG_DEBUG, "Device energy: device=%d type=%s energy=%.3fJ avg_power=%.3fW",
                   __cudampi__currentDevice,
                   __cudampi__isCpu() ? "CPU" : "GPU",
                   __cudampi__devicePowerConfig[__cudampi__currentDevice].currentEnergy,

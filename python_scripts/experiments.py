@@ -34,6 +34,7 @@ def write_powercap_conf(run_parameters: RunParameters, config_path: str = "power
     assert run_parameters.strategy in [
         "CONTINUOUS_GREEDY",
         "EQUAL_SPLIT",
+        "EQUAL_SPLIT_EDP_MONITOR",
         "BINARY_GREEDY",
         "EDP_GRADIENT_SIMPLE",
         "EDP_GRADIENT_SPSA",
@@ -83,7 +84,7 @@ def write_powercap_conf(run_parameters: RunParameters, config_path: str = "power
     with open(config_path, "w") as f:
         f.write("\n".join(lines) + "\n")
 
-def single_app_run(run_parameters: RunParameters) -> SingleRunResult:
+def single_app_run(run_parameters: RunParameters, log_save_path: str | None = "log.txt") -> SingleRunResult:
     repo_root = Path.home() / Path("parallel-processing-cpu-and-gpu-env-and-lib-with-powercap")
     cache_file = repo_root / "cache.txt"
     os.chdir(repo_root / "cudampilib")
@@ -106,8 +107,17 @@ def single_app_run(run_parameters: RunParameters) -> SingleRunResult:
         except Exception as e:
             result = None
             log(f"An error occurred while executing the command: {e}")
-    
-    if "No devices found under the power limit" in result.stderr:
+
+    # Persist the most recent run's output so log-based analysis (e.g. snr_test.py
+    # parsing [EDP_SAMPLE] lines) can read it. The library logs to stderr.
+    if log_save_path is not None and result is not None:
+        try:
+            with open(log_save_path, "w") as log_file:
+                log_file.write(result.stderr or "")
+        except Exception as e:
+            log(f"Failed to save run log to {log_save_path}: {e}")
+
+    if (result is None) or ("No devices found under the power limit" in result.stderr):
         return -1
 
     single_result = SingleRunResult.from_output(stdout=result.stdout, stderr=result.stderr)

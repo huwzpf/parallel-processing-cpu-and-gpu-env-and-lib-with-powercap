@@ -141,6 +141,7 @@ void __cudampi__applyAllPowercaps(void) {
   if (__cudampi__powercapStrategy == CONTINUOUS_GREEDY ||
       __cudampi__powercapStrategy == EQUAL_SHARE_CONTINUOUS_GREEDY ||
       __cudampi__powercapStrategy == EQUAL_SPLIT ||
+      __cudampi__powercapStrategy == EQUAL_SPLIT_EDP_MONITOR ||
       __cudampi__powercapStrategy == EDP_GRADIENT_SIMPLE ||
       __cudampi__powercapStrategy == EDP_GRADIENT_SPSA ||
       __cudampi__powercapStrategy == EDP_GRADIENT_CMAES) {
@@ -1203,6 +1204,14 @@ void __cudampi__loadAndLogPowercapConfig(void) {
       // EQUAL_SPLIT uses start_powercap per device; no global cap
       __cudampi__globalpowerlimit = 0;
       __cudampi__gradient_opt_start_powercap = file_config.start_powercap;
+    } else if (file_config.strategy == EQUAL_SPLIT_EDP_MONITOR) {
+      // Fixed equal caps like EQUAL_SPLIT, but the manager runs every window to
+      // measure and log EDP samples (no optimization).
+      __cudampi__globalpowerlimit = 0;
+      __cudampi__gradient_opt_start_powercap = file_config.start_powercap;
+      __cudampi__optimizer_step_interval = file_config.optimizer_step_interval > 0 ? file_config.optimizer_step_interval : 1ULL;
+      __cudampi__cpu_min_powercap = file_config.cpu_min_powercap > 0.0f ? file_config.cpu_min_powercap : 0.10f;
+      __cudampi__gpu_min_powercap = file_config.gpu_min_powercap > 0.0f ? file_config.gpu_min_powercap : 0.10f;
     } else if (file_config.strategy == EDP_GRADIENT_SIMPLE || file_config.strategy == EDP_GRADIENT_SPSA || file_config.strategy == EDP_GRADIENT_CMAES) {
       __cudampi__globalpowerlimit = 0;
       __cudampi__gradient_opt_start_powercap = file_config.start_powercap;
@@ -1249,6 +1258,10 @@ void __cudampi__loadAndLogPowercapConfig(void) {
       break;
     case EQUAL_SPLIT:
       log_message(LOG_INFO, "Powercap strategy: EQUAL_SPLIT");
+      log_message(LOG_INFO, "start_powercap (part of range): %f", __cudampi__gradient_opt_start_powercap);
+      break;
+    case EQUAL_SPLIT_EDP_MONITOR:
+      log_message(LOG_INFO, "Powercap strategy: EQUAL_SPLIT_EDP_MONITOR (fixed caps, EDP logging only)");
       log_message(LOG_INFO, "start_powercap (part of range): %f", __cudampi__gradient_opt_start_powercap);
       break;
     case EDP_GRADIENT_SIMPLE:
@@ -1378,7 +1391,8 @@ void __cudampi__applyInitialPowercapsForStrategy(void) {
   }
 
   if (
-      __cudampi__powercapStrategy == EQUAL_SPLIT) {
+      __cudampi__powercapStrategy == EQUAL_SPLIT ||
+      __cudampi__powercapStrategy == EQUAL_SPLIT_EDP_MONITOR) {
     for (int i = 0; i < __cudampi_totaldevicecount; i++) {
       float startPowerCap = __cudampi__gradient_opt_start_powercap;
       float lowerPowerCap = (float)__cudampi__deviceLowerNorm(i);
@@ -1512,7 +1526,8 @@ void __cudampi__powercappingManagerStep(void) {
   else if (
       __cudampi__powercapStrategy == EDP_GRADIENT_SIMPLE ||
       __cudampi__powercapStrategy == EDP_GRADIENT_SPSA ||
-      __cudampi__powercapStrategy == EDP_GRADIENT_CMAES) {
+      __cudampi__powercapStrategy == EDP_GRADIENT_CMAES ||
+      __cudampi__powercapStrategy == EQUAL_SPLIT_EDP_MONITOR) {
     static unsigned long long edp_opt_iterations = 0ULL; // number of completed optimisation updates
     static int edp_opt_limit_logged = 0;                 // avoid spamming logs when limit reached
     static unsigned long long edp_window_count = 0ULL;   // total sync windows seen
@@ -1599,7 +1614,7 @@ void __cudampi__powercappingManagerStep(void) {
         double norm = (maxv > minv) ? (__cudampi__devicePowerConfig[i].currentPowerCap - minv) / (maxv - minv) : 0.0;
         cap_pos += snprintf(cap_str + cap_pos, sizeof(cap_str) - cap_pos, "%s%.4f", i ? "," : "", norm);
       }
-      log_message(LOG_INFO, "[EDP_SAMPLE] window=%llu interval=%llu phase=%d energy_J=%.3f period_s=%.6f batches=%llu edp=%.8f avg_power=%.3fW energy_devices=%d cap=%s",
+      log_message(LOG_INFO, "[OPTIMIZER STEP] window=%llu interval=%llu phase=%d energy_J=%.3f period_s=%.6f batches=%llu edp=%.8f avg_power=%.3fW energy_devices=%d cap=%s",
                   edp_window_count, __cudampi__optimizer_step_interval, __cudampi__powercapStrategy,
                   combinedEnergy, period_sec, combinedDataPoints, __cudampi__edp,
                   combinedPower, energyDevices, cap_str);
@@ -1614,6 +1629,7 @@ void __cudampi__powercappingManagerStep(void) {
       // Use mean EDP across accumulated windows as the optimizer input
       __cudampi__edp = acc_edp / (double)acc_count;
       acc_edp = 0.0; acc_count = 0ULL;
+      log_message(LOG_WARN, "[EDP] edp=%.8f", __cudampi__edp);
 
       // If a limit is configured and already reached, stop further optimisation updates
       if (__cudampi__edp_optimization_steps > 0ULL && edp_opt_iterations >= __cudampi__edp_optimization_steps) {

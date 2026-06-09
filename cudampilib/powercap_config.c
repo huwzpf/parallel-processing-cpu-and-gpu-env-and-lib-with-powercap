@@ -58,6 +58,8 @@ int load_powercap_config(const char *path, powercap_config_t *config) {
                     config->strategy = EQUAL_SHARE_CONTINUOUS_GREEDY;
                 } else if (strcmp(value, "EQUAL_SPLIT") == 0) {
                     config->strategy = EQUAL_SPLIT;
+                } else if (strcmp(value, "EQUAL_SPLIT_EDP_MONITOR") == 0) {
+                    config->strategy = EQUAL_SPLIT_EDP_MONITOR;
                 } else if (strcmp(value, "BINARY_GREEDY") == 0) {
                     config->strategy = BINARY_GREEDY;
                 } else if (strcmp(value, "EQUAL_SHARE_BINARY_GREEDY") == 0) {
