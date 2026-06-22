@@ -1092,28 +1092,12 @@ cudaError_t __cudampi__deviceSynchronize(void) {
     if (power != (-1)) {
       __cudampi__devicePowerConfig[__cudampi__currentDevice].currentPower = power;
 
-      if (__cudampi__devicePowerConfig[__cudampi__currentDevice].currentPower > __cudampi__devicePowerConfig[__cudampi__currentDevice].currentPowerCap) {
-        // Make sure there are no noisy readings above the cap
-        __cudampi__devicePowerConfig[__cudampi__currentDevice].currentPower = __cudampi__devicePowerConfig[__cudampi__currentDevice].currentPowerCap;
-      }
-      
       log_message(LOG_DEBUG, "Got power %f with time in seconds = %f", power, time_in_seconds);
     }
 
     if (intervalEnergy > 0.0f) {
-      __cudampi__devicePowerConfig[__cudampi__currentDevice].currentEnergy = intervalEnergy;
       #pragma omp atomic
       __cudampi__totalEnergyUsed += intervalEnergy;
-    } else {
-      __cudampi__devicePowerConfig[__cudampi__currentDevice].currentEnergy = -1.0f;
-    }
-
-    if (__cudampi__devicePowerConfig[__cudampi__currentDevice].currentEnergy > 0.0f) {
-      log_message(LOG_DEBUG, "Device energy: device=%d type=%s energy=%.3fJ avg_power=%.3fW",
-                  __cudampi__currentDevice,
-                  __cudampi__isCpu() ? "CPU" : "GPU",
-                  __cudampi__devicePowerConfig[__cudampi__currentDevice].currentEnergy,
-                  __cudampi__devicePowerConfig[__cudampi__currentDevice].currentPower);
     }
     
     // Check if CPU batch size scaling was already done

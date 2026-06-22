@@ -30,7 +30,7 @@ int streamcount = 1;
 
 // As in the RNN app: simulate a larger problem by iterating over the
 // same allocated buffers multiple times to avoid huge host memory usage.
-#define ITERS 30
+#define ITERS 1
 
 int main(int argc, char **argv)
 {
@@ -44,6 +44,8 @@ int main(int argc, char **argv)
   streamcount = __cudampi__arguments.number_of_streams;
   batchsize   = __cudampi__arguments.batch_size;
   VECTORSIZE  = MONTECARLO_PROBLEM_SIZE;
+  // Runtime dataset iteration count (--iters); falls back to compile-time ITERS.
+  long long iters = (__cudampi__arguments.iters > 0) ? __cudampi__arguments.iters : ITERS;
 
   assert(batchsize % MONTECARLO_THREADS_IN_BLOCK == 0);
 
@@ -109,8 +111,8 @@ int main(int argc, char **argv)
     long long local_sync_intervals = 0, local_sync_sum_us = 0;
 
     do {
-      batch_pointer = __cudampi__getnextchunkindex(&globalcounter, ITERS * VECTORSIZE);
-      if (batch_pointer.start >= ITERS * VECTORSIZE) {
+      batch_pointer = __cudampi__getnextchunkindex(&globalcounter, iters * VECTORSIZE);
+      if (batch_pointer.start >= iters * VECTORSIZE) {
         finish = 1;
       } else {
         // Simulate larger memory by counting up to ITERS*VECTORSIZE while only
@@ -122,8 +124,8 @@ int main(int argc, char **argv)
         __cudampi__memcpyAsync(hits + batch_pointer.start, devHits, batch_pointer.n_elements * sizeof(unsigned int), cudaMemcpyDeviceToHost, stream1);
 
         if (streamcount == 2) {
-          batch_pointer = __cudampi__getnextchunkindex(&globalcounter, ITERS * VECTORSIZE);
-          if (batch_pointer.start >= ITERS * VECTORSIZE) {
+          batch_pointer = __cudampi__getnextchunkindex(&globalcounter, iters * VECTORSIZE);
+          if (batch_pointer.start >= iters * VECTORSIZE) {
             finish = 1;
           } else {
             batch_pointer.start = batch_pointer.start % (VECTORSIZE - batchsize);
@@ -162,7 +164,7 @@ int main(int argc, char **argv)
   }
 
   gettimeofday(&stop, NULL);
-  log_message(LOG_INFO, "Main elapsed time=%f\n", (double)((stop.tv_sec - start.tv_sec) + (double)(stop.tv_usec - start.tv_usec) / 1000000.0));
+  log_message(LOG_WARN, "Main elapsed time=%f\n", (double)((stop.tv_sec - start.tv_sec) + (double)(stop.tv_usec - start.tv_usec) / 1000000.0));
 
   if (total_sync_intervals > 0) {
     double avg_us = (double) total_sync_sum_us / (double) total_sync_intervals;

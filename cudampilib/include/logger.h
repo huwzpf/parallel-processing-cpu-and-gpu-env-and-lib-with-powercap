@@ -15,7 +15,7 @@ typedef enum { LOG_DEBUG = 0, LOG_INFO, LOG_WARN, LOG_ERROR } LogLevel;
 static const char *LOG_LEVEL_NAMES[] = {"DEBUG", "INFO", "WARN", "ERROR"};
 
 #ifdef ENABLE_LOGGING
-#define LOG_LEVEL_THRESHOLD LOG_INFO
+#define LOG_LEVEL_THRESHOLD LOG_WARN
 #endif
 
 #ifdef ENABLE_LOGGING_DEBUG

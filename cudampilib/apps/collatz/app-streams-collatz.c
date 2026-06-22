@@ -53,6 +53,8 @@ int main(int argc, char **argv)
   streamcount = __cudampi__arguments.number_of_streams;
   batchsize = __cudampi__arguments.batch_size;
   VECTORSIZE = COLLATZ_VECTORSIZE;
+  // Runtime dataset iteration count (--iters); falls back to compile-time ITERS.
+  long long iters = (__cudampi__arguments.iters > 0) ? __cudampi__arguments.iters : ITERS;
 
   assert(batchsize % COLLATZ_THREADS_IN_BLOCK == 0);
 
@@ -161,15 +163,15 @@ int main(int argc, char **argv)
 
     do 
     {
-      batch_pointer = __cudampi__getnextchunkindex(&globalcounter, ITERS * VECTORSIZE);
+      batch_pointer = __cudampi__getnextchunkindex(&globalcounter, iters * VECTORSIZE);
 
-      if (batch_pointer.start >= ITERS * VECTORSIZE) 
+      if (batch_pointer.start >= iters * VECTORSIZE) 
       {
         finish = 1;
       }
       else 
       {
-        // "Simulate" larger memory size by counting all the way to ITERS * VECTORSIZE (while only VECTORSIZE will fit into RAM)
+        // "Simulate" larger memory size by counting all the way to iters * VECTORSIZE (while only VECTORSIZE will fit into RAM)
         // (VECTORSIZE - batchsize) is largest value that batch_pointer.start can safely take (as n_elements <= batchsize)
         batch_pointer.start = batch_pointer.start % (VECTORSIZE - batchsize);
         __cudampi__memcpyAsync(devPtra, vectora + batch_pointer.start, batch_pointer.n_elements * sizeof(double), cudaMemcpyHostToDevice, stream1);
@@ -178,15 +180,15 @@ int main(int argc, char **argv)
 
         if (streamcount == 2) 
         {
-          batch_pointer = __cudampi__getnextchunkindex(&globalcounter, ITERS * VECTORSIZE);
+          batch_pointer = __cudampi__getnextchunkindex(&globalcounter, iters * VECTORSIZE);
 
-          if (batch_pointer.start >= ITERS * VECTORSIZE) 
+          if (batch_pointer.start >= iters * VECTORSIZE) 
           {
             finish = 1;
           } 
           else 
           {
-            // "Simulate" larger memory size by counting all the way to ITERS * VECTORSIZE (while only VECTORSIZE will fit into RAM)
+            // "Simulate" larger memory size by counting all the way to iters * VECTORSIZE (while only VECTORSIZE will fit into RAM)
             // (VECTORSIZE - batchsize) is largest value that batch_pointer.start can safely take (as n_elements <= batchsize)
             batch_pointer.start = batch_pointer.start % (VECTORSIZE - batchsize);
             __cudampi__memcpyAsync(devPtra2, vectora + batch_pointer.start, batch_pointer.n_elements * sizeof(double), cudaMemcpyHostToDevice, stream2);
@@ -236,7 +238,7 @@ int main(int argc, char **argv)
     }
   }
   gettimeofday(&stop, NULL);
-  log_message(LOG_INFO, "Main elapsed time=%f\n", (double)((stop.tv_sec - start.tv_sec) + (double)(stop.tv_usec - start.tv_usec) / 1000000.0));
+  log_message(LOG_WARN, "Main elapsed time=%f\n", (double)((stop.tv_sec - start.tv_sec) + (double)(stop.tv_usec - start.tv_usec) / 1000000.0));
 
   if (total_sync_intervals > 0) 
   {

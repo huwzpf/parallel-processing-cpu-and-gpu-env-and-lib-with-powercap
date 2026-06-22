@@ -81,6 +81,11 @@ def write_powercap_conf(run_parameters: RunParameters, config_path: str = "power
     lines.append(f"edp_optimization_steps={edp_optimization_steps}")
     lines.append(f"optimizer_step_interval={optimizer_step_interval}")
 
+    # Optional per-device cap override (perturb a single device for SNR tests)
+    if run_parameters.device_powercaps:
+        caps_csv = ",".join(f"{c:.4f}" for c in run_parameters.device_powercaps)
+        lines.append(f"device_powercaps={caps_csv}")
+
     with open(config_path, "w") as f:
         f.write("\n".join(lines) + "\n")
 

@@ -44,6 +44,13 @@ unsigned long long __cudampi__edp_optimization_steps = 0ULL;
 // Number of sync windows to aggregate before each optimizer step (default 1)
 unsigned long long __cudampi__optimizer_step_interval = 1ULL;
 
+// Optional per-device starting power caps (fractions of each device's range,
+// 0..1). When __cudampi__deviceCapOverrideCount > 0, these override the uniform
+// start_powercap for EQUAL_SPLIT / EQUAL_SPLIT_EDP_MONITOR so a single device can
+// be perturbed (used by the SNR diagnostic collector). 0 means "not specified".
+float __cudampi__deviceCapOverride[__CUDAMPI_MAX_THREAD_COUNT];
+int __cudampi__deviceCapOverrideCount = 0;
+
 // Gradient optimisation runtime parameters (configurable via powercap.conf)
 float __cudampi__gradient_start_alpha = 2.0f;
 float __cudampi__gradient_alpha_decay = 0.99f;
@@ -1225,6 +1232,15 @@ void __cudampi__loadAndLogPowercapConfig(void) {
       __cudampi__gpu_min_powercap = file_config.gpu_min_powercap > 0.0f ? file_config.gpu_min_powercap : 0.10f;
     }
     __cudampi__cpu_time_window_us = file_config.cpu_time_window_us;
+    // Copy optional per-device cap override (used by EQUAL_SPLIT / EDP_MONITOR)
+    __cudampi__deviceCapOverrideCount = file_config.device_powercaps_count;
+    for (int i = 0; i < file_config.device_powercaps_count && i < __CUDAMPI_MAX_THREAD_COUNT; i++) {
+      __cudampi__deviceCapOverride[i] = file_config.device_powercaps[i];
+    }
+    if (__cudampi__deviceCapOverrideCount > 0) {
+      log_message(LOG_WARN, "Per-device cap override active for %d devices (device_powercaps from config)",
+                  __cudampi__deviceCapOverrideCount);
+    }
     // Apply global powercap from config if provided (> 0)
     if (__cudampi__powercapStrategy != DISABLED && file_config.global_powercap > 0.0f) {
       log_message(LOG_INFO, "Setting global powercap from config: %f", file_config.global_powercap);
@@ -1322,7 +1338,6 @@ void __cudampi__allocAndGatherPowercapRanges(void) {
 void __cudampi__initDevicePowercapConfig(void) {
   for (int i = 0; i < __cudampi_totaldevicecount; i++) {
     __cudampi__devicePowerConfig[i].currentPower = -1; // initial value
-    __cudampi__devicePowerConfig[i].currentEnergy = -1.0f;
     __cudampi__devicePowerConfig[i].deviceEnabled = 1;
 
     const int rank = __cudampi_targetMPIrankfordevice[i];
@@ -1340,6 +1355,20 @@ void __cudampi__initDevicePowercapConfig(void) {
         __cudampi__devicePowerConfig[i].powercapRange.max,
         __cudampi__cpu_min_powercap);
     }
+  }
+
+  // Emit the device->(type, MPI rank) mapping once so log-based analysis can
+  // classify each device index as master GPU / slave GPU / slave CPU. Rank 0 is
+  // the master node. cap-vector positions in [OPTIMIZER STEP] match these indices.
+  for (int i = 0; i < __cudampi_totaldevicecount; i++) {
+    const int rank = __cudampi_targetMPIrankfordevice[i];
+    const int isGpu = (i < __cudampi_totalgpudevicecount);
+    const char *type = isGpu ? "GPU" : "CPU";
+    const char *role = (rank == 0) ? "master" : "slave";
+    log_message(LOG_WARN, "[DEVICE TOPOLOGY] index=%d type=%s rank=%d role=%s min=%.3f max=%.3f",
+                i, type, rank, role,
+                __cudampi__devicePowerConfig[i].powercapRange.min,
+                __cudampi__devicePowerConfig[i].powercapRange.max);
   }
 }
 
@@ -1403,6 +1432,28 @@ void __cudampi__applyInitialPowercapsForStrategy(void) {
         __cudampi__devicePowerConfig[i].powercapRange.min,
         __cudampi__devicePowerConfig[i].powercapRange.max,
         startPowerCap);
+    }
+
+    // Optional per-device override: replace the uniform cap for any device that
+    // has an explicit fraction in device_powercaps (clamped to its lower bound).
+    // Lets the SNR collector hold all devices at base_cap while bumping one by eps.
+    if (__cudampi__deviceCapOverrideCount > 0) {
+      for (int i = 0; i < __cudampi_totaldevicecount && i < __cudampi__deviceCapOverrideCount; i++) {
+        float frac = __cudampi__deviceCapOverride[i];
+        float lowerPowerCap = (float)__cudampi__deviceLowerNorm(i);
+        if (frac < lowerPowerCap) {
+          frac = lowerPowerCap;
+        }
+        if (frac > 1.0f) {
+          frac = 1.0f;
+        }
+        __cudampi__devicePowerConfig[i].currentPowerCap = getPowerCapFromRange(
+          __cudampi__devicePowerConfig[i].powercapRange.min,
+          __cudampi__devicePowerConfig[i].powercapRange.max,
+          frac);
+        log_message(LOG_WARN, "[CAP OVERRIDE] device %d set to fraction %.4f -> %.3f W",
+                    i, frac, __cudampi__devicePowerConfig[i].currentPowerCap);
+      }
     }
   }
 
@@ -1534,7 +1585,7 @@ void __cudampi__powercappingManagerStep(void) {
     static unsigned long long acc_count = 0ULL;          // windows accumulated since last optimizer step
     static double acc_edp = 0.0;                         // sum of per-window EDP values
     double combinedEnergy = 0.0;
-    int energyDevices = 0;
+
     // TODO: Reintroduce stricter EDP sample validation/rejection once this path has settled.
     // log_message(LOG_INFO, "EDP Gradient Optimization: Checking if all devices have completed their last batch.");
     int allDevicesCompleted = 1;
@@ -1546,10 +1597,8 @@ void __cudampi__powercappingManagerStep(void) {
         omp_unset_lock(&(__cudampi__devicelocks[i]));
         break;
       }
-      if (__cudampi__devicePowerConfig[i].currentEnergy > 0.0f) {
-        combinedEnergy += __cudampi__devicePowerConfig[i].currentEnergy;
-        energyDevices++;
-      }
+      combinedPower += __cudampi__devicePowerConfig[i].currentPower;
+  
       if (__cudampi__timePerDataPoint[i] > 0.0 && isfinite(__cudampi__timePerDataPoint[i])) {
         sumTimePerDataPoint += __cudampi__timePerDataPoint[i];
         sumRecipTimePerDataPoint += 1.0 / __cudampi__timePerDataPoint[i];
@@ -1593,9 +1642,8 @@ void __cudampi__powercappingManagerStep(void) {
       log_message(LOG_WARN, "EDP estimated batch denominator is zero (estimated_dp=%.3f). Using 1.", estimatedDataPointsD);
       combinedDataPoints = 1ULL;
     }
-    if (combinedEnergy > 0.0 && period_sec > 0.0) {
-      combinedPower = combinedEnergy / period_sec;
-    }
+    combinedEnergy = combinedPower * period_sec;
+
     if (combinedEnergy > 0.0 && period_sec > 0.0) {
       __cudampi__edp = (combinedEnergy * period_sec) /
                         (((double)combinedDataPoints) * ((double)combinedDataPoints));
@@ -1614,10 +1662,10 @@ void __cudampi__powercappingManagerStep(void) {
         double norm = (maxv > minv) ? (__cudampi__devicePowerConfig[i].currentPowerCap - minv) / (maxv - minv) : 0.0;
         cap_pos += snprintf(cap_str + cap_pos, sizeof(cap_str) - cap_pos, "%s%.4f", i ? "," : "", norm);
       }
-      log_message(LOG_INFO, "[OPTIMIZER STEP] window=%llu interval=%llu phase=%d energy_J=%.3f period_s=%.6f batches=%llu edp=%.8f avg_power=%.3fW energy_devices=%d cap=%s",
+      log_message(LOG_WARN, "[OPTIMIZER STEP] window=%llu interval=%llu phase=%d energy_J=%.3f period_s=%.6f batches=%llu edp=%.8f avg_power=%.3fW cap=%s",
                   edp_window_count, __cudampi__optimizer_step_interval, __cudampi__powercapStrategy,
                   combinedEnergy, period_sec, combinedDataPoints, __cudampi__edp,
-                  combinedPower, energyDevices, cap_str);
+                  combinedPower, cap_str);
     }
 
     // Accumulate EDP for N-window averaging before optimizer step

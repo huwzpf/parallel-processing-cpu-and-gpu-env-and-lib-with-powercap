@@ -188,7 +188,7 @@ int main(int argc, char **argv)
 
   }
   gettimeofday(&stop, NULL);
-  log_message(LOG_INFO, "Main elapsed time=%f\n", (double)((stop.tv_sec - start.tv_sec) + (double)(stop.tv_usec - start.tv_usec) / 1000000.0));
+  log_message(LOG_WARN, "Main elapsed time=%f\n", (double)((stop.tv_sec - start.tv_sec) + (double)(stop.tv_usec - start.tv_usec) / 1000000.0));
   log_message(LOG_INFO, "Total communication time=%f s, Total computation time=%f s\n", total_communication_time, total_computation_time);
 
   __cudampi__terminateMPI();

@@ -33,6 +33,8 @@ int load_powercap_config(const char *path, powercap_config_t *config) {
     config->edp_optimization_steps = 0ULL;
     // Default: one optimizer step per sync window
     config->optimizer_step_interval = 1ULL;
+    // Default: no per-device cap override (uniform caps)
+    config->device_powercaps_count = 0;
 
     FILE *f = fopen(path, "r");
     if (!f) {
@@ -47,8 +49,8 @@ int load_powercap_config(const char *path, powercap_config_t *config) {
         if (strlen(line) == 0) continue;
 
         char key[128];
-        char value[128];
-        if (sscanf(line, "%127[^=]=%127s", key, value) == 2) {
+        char value[256];
+        if (sscanf(line, "%127[^=]=%255s", key, value) == 2) {
             if (strcmp(key, "strategy") == 0) {
                 if (strcmp(value, "DISABLED") == 0) {
                     config->strategy = DISABLED;
@@ -97,6 +99,17 @@ int load_powercap_config(const char *path, powercap_config_t *config) {
                 // windows to aggregate per optimizer step (min 1)
                 config->optimizer_step_interval = (unsigned long long)strtoull(value, NULL, 10);
                 if (config->optimizer_step_interval < 1) config->optimizer_step_interval = 1;
+            } else if (strcmp(key, "device_powercaps") == 0) {
+                // Comma-separated per-device cap fractions (0..1), one per device.
+                // e.g. device_powercaps=0.4,0.4,0.6,0.4,0.4,0.4,0.4
+                int count = 0;
+                char *saveptr = NULL;
+                char *tok = strtok_r(value, ",", &saveptr);
+                while (tok != NULL && count < __CUDAMPI_MAX_THREAD_COUNT) {
+                    config->device_powercaps[count++] = (float)atof(tok);
+                    tok = strtok_r(NULL, ",", &saveptr);
+                }
+                config->device_powercaps_count = count;
             }
             // Unknown keys are ignored to keep parser extendable
         }

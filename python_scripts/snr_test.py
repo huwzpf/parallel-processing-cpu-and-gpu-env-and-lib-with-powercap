@@ -3,13 +3,18 @@ SNR diagnostic for EDP gradient optimization.
 
 This runs the library in EQUAL_SPLIT_EDP_MONITOR mode: power caps are held fixed
 (exactly like EQUAL_SPLIT), but the power capping manager still executes so it
-measures EDP and emits, once per optimizer step (i.e. every N=optimizer_step_interval
-sync windows, on the N-window-averaged value), a minimal log line:
+measures EDP and emits, once per sync window, a structured per-window log line:
 
-    [EDP] edp=<value>
+    [OPTIMIZER STEP] window=<w> interval=<N> ... edp=<value> ...
 
-This script parses *only* those [EDP] lines.  Each line is one EDP estimate the
-optimizer would have consumed at the current cap.
+Each [OPTIMIZER STEP] line carries the *raw, single-window* EDP measurement. The
+library forms an optimizer estimate by averaging N=optimizer_step_interval
+consecutive windows (the value it also emits as a [EDP] line). This script
+reproduces that averaging itself: it runs only at the *highest* N and parses the
+per-window [OPTIMIZER STEP] EDPs, then derives the estimates for every smaller N
+by grouping the windows into non-overlapping chunks of N and averaging — exactly
+what the library does internally. So a single run yields the estimates for all N
+values, instead of one (slower) run per N.
 
 For a fixed cap, the spread of these estimates is the measurement *noise*.  The
 difference in mean EDP between two caps is the *signal* a gradient optimizer would
@@ -18,10 +23,10 @@ distinguishable above noise — i.e. whether gradient optimization can work for 
 given (batch_size, N).
 
 N is the optimizer_step_interval (the number of windows averaged per estimate).
-The dataset length scales with N so each run yields a comparable number of EDP
-estimates regardless of N or batch size:
+The run length is sized for the highest N so enough windows exist to derive every
+smaller N:
 
-    iters = round(N * number_of_nodes * batch_size / 2)
+    iters = round(max(N) * number_of_nodes * batch_size / 2)
 
 Usage:
     python snr_test.py [--app {cnn,rnn}] [--out-dir OUTPUT_DIR] [--nodes N [N ...]]
@@ -52,19 +57,31 @@ from models import RunParameters
 # Experiment runner
 # ---------------------------------------------------------------------------
 
-def compute_iters(n: int, number_od_nodes: int, batch_size: int) -> int:
-    """Dataset iteration count for a run: round(N * nodes * batch_size / 20.0). - treat 20 as default batch size to keep iters in a reasonable range across different batch sizes."""
-    return int(round(n * number_od_nodes * batch_size / 20.0))
+# Each app's default batch size. iters is normalized by this so the run length
+# stays in a reasonable range regardless of which app / batch_size is swept.
+# CNN and RNN default to 20; the remaining apps default to 240000.
+DEFAULT_BATCH_SIZES = {"cnn": 20, "rnn": 20}
+DEFAULT_BATCH_SIZE_FALLBACK = 240000
 
 
-def parse_edp_estimates(log_file: str) -> pd.DataFrame | None:
+def compute_iters(n: int, number_od_nodes: int, batch_size: int, app_name: str) -> int:
+    """Dataset iteration count for a run: round(N * nodes * batch_size / default_bs),
+    where default_bs is the app's default batch size (treated as a normalizer to keep
+    iters in a reasonable range across different batch sizes)."""
+    default_bs = DEFAULT_BATCH_SIZES.get(app_name, DEFAULT_BATCH_SIZE_FALLBACK)
+    return int(round(n * number_od_nodes * batch_size / default_bs))
+
+
+def parse_window_edps(log_file: str) -> np.ndarray | None:
     """
-    Parse the minimal '[EDP] edp=<value>' lines from a cudampilib log file.
+    Parse the per-window '[OPTIMIZER STEP] ... edp=<value> ...' lines from a
+    cudampilib log file, returning the raw single-window EDP measurements in
+    window order (a 1-D float array), or None if no such lines were found.
 
-    Returns a DataFrame with columns (step, edp) — one row per optimizer step —
-    or None if no [EDP] lines were found.
+    These are the un-averaged windows; derive_edp_estimates() averages them into
+    the N-window estimates the optimizer would have consumed.
     """
-    pattern = re.compile(r"\[EDP\]\s+edp=([\d.eE+\-]+)")
+    pattern = re.compile(r"\[OPTIMIZER STEP\].*?\bedp=([\d.eE+\-]+)")
     edps = []
     try:
         with open(log_file, "r", errors="replace") as f:
@@ -73,25 +90,50 @@ def parse_edp_estimates(log_file: str) -> pd.DataFrame | None:
                 if m:
                     edps.append(float(m.group(1)))
     except FileNotFoundError:
-        print(f"[parse_edp_estimates] Log file not found: {log_file}")
+        print(f"[parse_window_edps] Log file not found: {log_file}")
         return None
 
     if not edps:
         return None
-    return pd.DataFrame({"step": range(len(edps)), "edp": edps})
+    return np.asarray(edps, dtype=float)
 
 
-def _run_edp_monitor(app_name: str, batch_size: int, cap: float, step_interval: int,
-                     n_runs: int, out_dir: str, number_od_nodes: int = 8) -> pd.DataFrame | None:
+def derive_edp_estimates(window_edps: np.ndarray, N: int) -> np.ndarray:
     """
-    Run EQUAL_SPLIT_EDP_MONITOR at a fixed cap and collect every [EDP] estimate.
+    Reproduce the library's N-window averaging from raw per-window EDPs.
+
+    The library accumulates N consecutive windows and emits their mean as one
+    [EDP] estimate (acc_edp += edp; when acc_count >= N: edp = acc_edp / N).
+    This groups window_edps into non-overlapping chunks of N and averages each,
+    dropping a trailing partial chunk — identical to the in-library behaviour.
+
+    Returns a 1-D array of one EDP estimate per chunk (empty if fewer than N
+    windows are available).
+    """
+    n_full = len(window_edps) // N
+    if n_full == 0:
+        return np.empty(0, dtype=float)
+    trimmed = window_edps[:n_full * N]
+    return trimmed.reshape(n_full, N).mean(axis=1)
+
+
+def _run_edp_monitor(app_name: str, batch_size: int, cap: float, n_values: list[int],
+                     n_runs: int, out_dir: str, number_od_nodes: int = 8,
+                     cpu_enabled: bool = True) -> pd.DataFrame | None:
+    """
+    Run EQUAL_SPLIT_EDP_MONITOR at a fixed cap, once at the highest N, and derive
+    the EDP estimates for *every* N in n_values from the per-window
+    [OPTIMIZER STEP] log lines (see derive_edp_estimates).
+
     Returns a DataFrame of per-step estimates tagged with rep / batch_size /
-    base_cap / optimizer_step_interval, or None if nothing was captured.
+    base_cap / optimizer_step_interval (one block of rows per N), or None if
+    nothing was captured.
     """
-    iters = compute_iters(step_interval, number_od_nodes, batch_size)
+    max_N = max(n_values)
+    iters = compute_iters(max_N, number_od_nodes, batch_size, app_name)
     params = RunParameters(
         app_name=app_name,
-        cpu_enabled=True,
+        cpu_enabled=cpu_enabled,
         number_of_streams=2,
         number_od_nodes=number_od_nodes,
         batch_size=batch_size,
@@ -100,28 +142,33 @@ def _run_edp_monitor(app_name: str, batch_size: int, cap: float, step_interval: 
         initial_cpu_batch_size_scaling=0,
         start_powercap=cap,
         iters=iters,
-        optimizer_step_interval=step_interval,
+        optimizer_step_interval=max_N,
     )
 
     frames = []
     for rep in range(n_runs):
         log_path = os.path.abspath(os.path.join(
-            out_dir, f"log_{app_name}_bs{batch_size}_cap{cap:.2f}_N{step_interval}_rep{rep}.txt"
+            out_dir, f"log_{app_name}_bs{batch_size}_cap{cap:.2f}_N{max_N}_rep{rep}.txt"
         ))
         print(f"[SNR] MONITOR app={app_name} bs={batch_size} cap={cap:.3f} "
-              f"N={step_interval} iters={iters} rep={rep + 1}/{n_runs}")
+              f"N={max_N} iters={iters} rep={rep + 1}/{n_runs}")
         single_app_run(params, log_save_path=log_path)
-        df = parse_edp_estimates(log_path)
-        if df is None or df.empty:
-            print(f"[SNR]   no [EDP] estimates parsed from {log_path}")
+        window_edps = parse_window_edps(log_path)
+        if window_edps is None or len(window_edps) == 0:
+            print(f"[SNR]   no [OPTIMIZER STEP] windows parsed from {log_path}")
             continue
-        df = df.copy()
-        df["rep"] = rep
-        df["batch_size"] = batch_size
-        df["base_cap"] = cap
-        df["optimizer_step_interval"] = step_interval
-        df["iters"] = iters
-        frames.append(df)
+        for N in n_values:
+            est = derive_edp_estimates(window_edps, N)
+            if len(est) == 0:
+                print(f"[SNR]   only {len(window_edps)} windows; too few to derive N={N}")
+                continue
+            df = pd.DataFrame({"step": range(len(est)), "edp": est})
+            df["rep"] = rep
+            df["batch_size"] = batch_size
+            df["base_cap"] = cap
+            df["optimizer_step_interval"] = N
+            df["iters"] = iters
+            frames.append(df)
 
     if not frames:
         return None
@@ -136,11 +183,14 @@ def run_snr_experiments(
     n_runs: int = 3,
     out_dir: str = "snr_results",
     number_od_nodes: int = 8,
+    cpu_enabled: bool = True,
 ) -> dict:
     """
-    Run the EDP-monitor SNR diagnostic over the grid (batch_size, N, base_cap).
+    Run the EDP-monitor SNR diagnostic over the grid (batch_size, base_cap).
 
-    Collects the raw [EDP] estimates, saves them to edp_estimates_raw.csv, then
+    For each (batch_size, cap) it runs once at the highest N and derives the
+    estimates for every N in n_values from the per-window [OPTIMIZER STEP] logs.
+    Collects the derived estimates, saves them to edp_estimates_raw.csv, then
     hands them to process_snr_results() for statistics, SNR, and logging.
 
     Returns the dict produced by process_snr_results.
@@ -151,11 +201,11 @@ def run_snr_experiments(
     caps = sorted(base_caps)
     frames = []
     for batch_size in batch_sizes:
-        for N in n_values:
-            for cap in caps:
-                df = _run_edp_monitor(app_name, batch_size, cap, N, n_runs, out_dir, number_od_nodes)
-                if df is not None:
-                    frames.append(df)
+        for cap in caps:
+            df = _run_edp_monitor(app_name, batch_size, cap, n_values, n_runs, out_dir,
+                                  number_od_nodes, cpu_enabled=cpu_enabled)
+            if df is not None:
+                frames.append(df)
 
     if not frames:
         print("[SNR] No [EDP] estimates collected from any run.")
@@ -276,6 +326,94 @@ def _log_summary(per_cap: pd.DataFrame, snr_grid: pd.DataFrame, out_dir: str) ->
     print(f"  {out_dir}/per_cap_stats.csv")
     print(f"  {out_dir}/snr_grid.csv")
     print("=" * 78 + "\n")
+
+
+def build_estimates_from_logs(
+    out_dir: str,
+    n_values: list[int],
+    app_name: str | None = None,
+    number_od_nodes: int | None = None,
+) -> pd.DataFrame:
+    """
+    Rebuild the raw [EDP] estimates DataFrame by re-parsing the per-run
+    'log_*.txt' files already stored in out_dir, instead of re-running the
+    (slow) experiments.
+
+    Each log is named
+        log_<app>_bs<batch_size>_cap<cap>_N<maxN>_rep<rep>.txt
+    (see _run_edp_monitor). The filename carries batch_size / cap / max_N / rep;
+    the per-window EDPs are parsed from the '[OPTIMIZER STEP]' lines and the
+    estimates for every N in n_values are derived from them (derive_edp_estimates),
+    exactly as a live run would.
+
+    number_od_nodes (for the iters column) is taken from the argument if given,
+    else inferred from a '<n>_nodes' suffix on out_dir; app_name likewise falls
+    back to the name embedded in each log filename.
+
+    Returns the concatenated per-step estimates (empty DataFrame if no parseable
+    logs were found).
+    """
+    out_dir = os.path.abspath(out_dir)
+    name_re = re.compile(
+        r"^log_(?P<app>.+)_bs(?P<bs>\d+)_cap(?P<cap>[\d.]+)_N(?P<N>\d+)_rep(?P<rep>\d+)\.txt$"
+    )
+
+    if number_od_nodes is None:
+        m = re.search(r"_(\d+)_nodes", os.path.basename(out_dir))
+        number_od_nodes = int(m.group(1)) if m else None
+
+    log_files = sorted(Path(out_dir).glob("log_*.txt"))
+    if not log_files:
+        print(f"[SNR] build_estimates_from_logs: no log_*.txt files in {out_dir}")
+        return pd.DataFrame()
+
+    frames = []
+    for log_path in log_files:
+        m = name_re.match(log_path.name)
+        if not m:
+            print(f"[SNR]   skipping unrecognised log name: {log_path.name}")
+            continue
+        app = app_name or m.group("app")
+        batch_size = int(m.group("bs"))
+        cap = float(m.group("cap"))
+        max_N = int(m.group("N"))
+        rep = int(m.group("rep"))
+
+        window_edps = parse_window_edps(str(log_path))
+        if window_edps is None or len(window_edps) == 0:
+            print(f"[SNR]   no [OPTIMIZER STEP] windows parsed from {log_path.name}")
+            continue
+
+        iters = (compute_iters(max_N, number_od_nodes, batch_size, app)
+                 if number_od_nodes is not None else float("nan"))
+
+        # Only derive N values that the run actually had enough windows for
+        # (and that don't exceed the run's max_N).
+        for N in n_values:
+            if N > max_N:
+                continue
+            est = derive_edp_estimates(window_edps, N)
+            if len(est) == 0:
+                print(f"[SNR]   {log_path.name}: only {len(window_edps)} windows; "
+                      f"too few to derive N={N}")
+                continue
+            df = pd.DataFrame({"step": range(len(est)), "edp": est})
+            df["rep"] = rep
+            df["batch_size"] = batch_size
+            df["base_cap"] = cap
+            df["optimizer_step_interval"] = N
+            df["iters"] = iters
+            frames.append(df)
+
+    if not frames:
+        print(f"[SNR] build_estimates_from_logs: no estimates derived from logs in {out_dir}")
+        return pd.DataFrame()
+
+    estimates = pd.concat(frames, ignore_index=True)
+    estimates.to_csv(os.path.join(out_dir, "edp_estimates_raw.csv"), index=False)
+    print(f"[SNR] Rebuilt {len(estimates)} EDP estimates from {len(log_files)} logs in "
+          f"{out_dir}; raw data -> {out_dir}/edp_estimates_raw.csv")
+    return estimates
 
 
 def load_results(out_dir: str = "snr_results") -> dict:
@@ -481,14 +619,14 @@ def plot_snr_results(results: dict, out_dir: str = "snr_results") -> None:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="SNR diagnostic for EDP optimization (EQUAL_SPLIT_EDP_MONITOR)")
-    parser.add_argument("--app", choices=["cnn", "rnn"], default="cnn")
+    parser.add_argument("--app", choices=["cnn", "rnn", "montecarlo"], default="rnn")
     parser.add_argument("--out-dir", default="snr_results",
                         help="Base output dir; each node count gets its own '<out-dir>_<n>_nodes'")
-    parser.add_argument("--nodes", nargs="+", type=int, default=[8, 4],
+    parser.add_argument("--nodes", nargs="+", type=int, default=[4],
                         help="Node counts to sweep; experiments+plots are repeated for each")
     parser.add_argument("--n-runs", type=int, default=3, help="Repetitions per (batch_size, N, cap)")
     parser.add_argument(
-        "--batch-sizes", nargs="+", type=int, default=[50],
+        "--batch-sizes", nargs="+", type=int, default=[20, 50, 100],
         help="Batch sizes to sweep"
     )
     parser.add_argument(
@@ -496,23 +634,41 @@ if __name__ == "__main__":
         help="Fixed cap fractions (of range) to compare"
     )
     parser.add_argument(
-        "--n-values", nargs="+", type=int, default=[5, 10, 20],
-        help="N (optimizer_step_interval) values; iters = round(N * nodes * batch_size / 2)"
+        "--n-values", nargs="+", type=int, default=[1, 5, 10, 20],
+        help="N (optimizer_step_interval) values; one run at max(N) is collected and "
+             "the smaller N are derived from its per-window [OPTIMIZER STEP] logs"
     )
     parser.add_argument(
         "--plots-only", action="store_true",
         help="Skip experiments; regenerate plots from CSVs already in --out-dir"
+    )
+    parser.add_argument(
+        "--from-logs", action="store_true",
+        help="Skip experiments; re-parse stored log_*.txt files in --out-dir to "
+             "regenerate the CSVs (edp_estimates_raw / per_cap_stats / snr_grid)"
+    )
+    parser.add_argument(
+        "--gpu-only", action="store_true",
+        help="Disable CPU execution (GPU-only runs); sets cpu_enabled=False"
     )
     args = parser.parse_args()
 
     # Run the identical experiment + plotting pipeline once per node count,
     # writing each into its own directory (e.g. snr_results_4_nodes).
     for nodes in args.nodes:
-        node_out_dir = f"{args.out_dir}_{nodes}_nodes"
+        node_out_dir = f"{args.app}_{args.out_dir}_{nodes}_nodes"
         print(f"\n[SNR] ===== node count = {nodes} -> {node_out_dir} =====")
 
         if args.plots_only:
             results = load_results(out_dir=node_out_dir)
+        elif args.from_logs:
+            estimates = build_estimates_from_logs(
+                out_dir=node_out_dir,
+                n_values=args.n_values,
+                app_name=args.app,
+                number_od_nodes=nodes,
+            )
+            results = process_snr_results(estimates, out_dir=node_out_dir)
         else:
             results = run_snr_experiments(
                 app_name=args.app,
@@ -522,5 +678,6 @@ if __name__ == "__main__":
                 n_runs=args.n_runs,
                 out_dir=node_out_dir,
                 number_od_nodes=nodes,
+                cpu_enabled=not args.gpu_only,
             )
         plot_snr_results(results, out_dir=node_out_dir)

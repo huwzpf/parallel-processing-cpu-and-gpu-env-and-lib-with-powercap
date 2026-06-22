@@ -22,6 +22,12 @@ typedef struct {
     unsigned long long edp_optimization_steps;
     // Number of sync windows to aggregate before each optimizer step (default 1)
     unsigned long long optimizer_step_interval;
+    // Optional per-device starting power caps (fractions of each device's range,
+    // 0..1), applied for EQUAL_SPLIT / EQUAL_SPLIT_EDP_MONITOR after the uniform
+    // start_powercap init. Used to perturb a single device for SNR diagnostics.
+    // device_powercaps_count == 0 means "not specified" (uniform caps as before).
+    float device_powercaps[__CUDAMPI_MAX_THREAD_COUNT];
+    int device_powercaps_count;
 } powercap_config_t;
 
 // Loads configuration from a simple key=value file.

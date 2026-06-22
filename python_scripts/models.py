@@ -56,6 +56,10 @@ class RunParameters:
     iters: int | None = None
     # Windows to aggregate per optimizer step (None = 1, i.e. every window)
     optimizer_step_interval: int | None = None
+    # Optional per-device starting power caps (fractions of each device's range,
+    # 0..1), one per device. Applied for EQUAL_SPLIT / EQUAL_SPLIT_EDP_MONITOR to
+    # perturb a single device for SNR diagnostics. None = uniform start_powercap.
+    device_powercaps: list[float] | None = None
 
 
 @dataclass
