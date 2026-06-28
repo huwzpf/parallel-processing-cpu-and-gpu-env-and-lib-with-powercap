@@ -35,7 +35,7 @@ Columns in perturbation_samples.csv (one row per sync window):
     app, nodes, batch_size, base_cap, perturbed_device, perturbed_type,
     perturbed_role, eps, sign, rep, n_max, iters,
     window, interval, phase, energy_J, period_s, batches, edp, avg_power,
-    energy_devices, cap_vector, perturbed_cap_realized
+    cap_vector, perturbed_cap_realized
 """
 
 import argparse
@@ -53,7 +53,7 @@ from models import RunParameters
 # by the app's default batch size so it stays in a reasonable range across batch
 # sizes. CNN and RNN default to 20; the remaining apps default to 240000.
 # ---------------------------------------------------------------------------
-DEFAULT_BATCH_SIZES = {"cnn": 20, "rnn": 20}
+DEFAULT_BATCH_SIZES = {"cnn": 50, "rnn": 50}
 DEFAULT_BATCH_SIZE_FALLBACK = 240000
 
 
@@ -75,7 +75,6 @@ _OPT_STEP_RE = re.compile(
     r"batches=(?P<batches>\d+)\s+"
     r"edp=(?P<edp>[-\d.eE+]+)\s+"
     r"avg_power=(?P<avg_power>[-\d.eE+]+)W\s+"
-    r"energy_devices=(?P<energy_devices>\d+)\s+"
     r"cap=(?P<cap>[-\d.,eE+]+)"
 )
 
@@ -122,7 +121,6 @@ def parse_optimizer_steps(log_file: str) -> list[dict]:
                     "batches": int(m.group("batches")),
                     "edp": float(m.group("edp")),
                     "avg_power": float(m.group("avg_power")),
-                    "energy_devices": int(m.group("energy_devices")),
                     "cap_vector": m.group("cap"),
                 })
     except FileNotFoundError:
@@ -137,7 +135,7 @@ CSV_COLUMNS = [
     "app", "nodes", "batch_size", "base_cap", "perturbed_device",
     "perturbed_type", "perturbed_role", "eps", "sign", "rep", "n_max", "iters",
     "window", "interval", "phase", "energy_J", "period_s", "batches", "edp",
-    "avg_power", "energy_devices", "cap_vector", "perturbed_cap_realized",
+    "avg_power", "cap_vector", "perturbed_cap_realized",
 ]
 
 
@@ -275,6 +273,112 @@ def discover_devices(app_name, batch_size, nodes, n_max, iters, out_dir,
 
 
 # ---------------------------------------------------------------------------
+# Offline CSV rebuild (no runs): reconstruct perturbation_samples.csv from the
+# per-run log_*.txt files left behind by a previous (possibly interrupted) run.
+# ---------------------------------------------------------------------------
+_BASELINE_LOG_RE = re.compile(
+    r"^log_baseline_cap(?P<base_cap>\d+\.\d+)_rep(?P<rep>\d+)\.txt$")
+_DEV_LOG_RE = re.compile(
+    r"^log_dev(?P<device>\d+)_cap(?P<base_cap>\d+\.\d+)_eps(?P<eps>\d+\.\d+)"
+    r"_sgn(?P<sign>[pm])_rep(?P<rep>\d+)\.txt$")
+
+
+def load_topology_csv(out_dir: str) -> dict[int, dict]:
+    """Load device_topology.csv (written by discover_devices) -> {index: {...}}."""
+    topo: dict[int, dict] = {}
+    path = os.path.join(out_dir, "device_topology.csv")
+    if not os.path.exists(path):
+        return topo
+    with open(path, "r", newline="") as f:
+        for row in csv.DictReader(f):
+            try:
+                topo[int(row["index"])] = {
+                    "type": row.get("type", "UNKNOWN"),
+                    "rank": int(row.get("rank", -1)),
+                    "role": row.get("role", "unknown"),
+                }
+            except (KeyError, ValueError):
+                continue
+    return topo
+
+
+def _meta_from_log_name(name: str, topo: dict[int, dict]) -> dict | None:
+    """Reconstruct the per-cell meta (everything not in the OPTIMIZER STEP line)
+    from a log filename. Returns None for files that aren't run logs."""
+    m = _BASELINE_LOG_RE.match(name)
+    if m:
+        return {
+            "base_cap": float(m.group("base_cap")), "perturbed_device": -1,
+            "perturbed_type": "baseline", "perturbed_role": "baseline",
+            "eps": 0.0, "sign": 0, "rep": int(m.group("rep")),
+        }
+    m = _DEV_LOG_RE.match(name)
+    if m:
+        device = int(m.group("device"))
+        t = topo.get(device, {"type": "UNKNOWN", "role": "unknown"})
+        return {
+            "base_cap": float(m.group("base_cap")), "perturbed_device": device,
+            "perturbed_type": t["type"], "perturbed_role": t["role"],
+            "eps": float(m.group("eps")),
+            "sign": +1 if m.group("sign") == "p" else -1,
+            "rep": int(m.group("rep")),
+        }
+    return None
+
+
+def rebuild_csv_from_logs(app_name, batch_size, nodes, out_dir):
+    """Regenerate perturbation_samples.csv from existing log_*.txt files without
+    running anything. app/nodes/batch_size aren't in the logs, so they're taken
+    from the CLI (must match the original run); n_max is read back from the
+    OPTIMIZER STEP 'interval' field per row."""
+    out_dir = os.path.abspath(out_dir)
+    csv_path = os.path.join(out_dir, "perturbation_samples.csv")
+    if not os.path.isdir(out_dir):
+        raise RuntimeError(f"Output dir does not exist: {out_dir}")
+
+    topo = load_topology_csv(out_dir)
+    if not topo:
+        print("[rebuild] No device_topology.csv; perturbed_type/role will be UNKNOWN")
+
+    log_names = sorted(n for n in os.listdir(out_dir) if n.startswith("log_"))
+    if not log_names:
+        raise RuntimeError(f"No log_*.txt files found in {out_dir}")
+
+    f = open(csv_path, "w", newline="")
+    writer = csv.DictWriter(f, fieldnames=CSV_COLUMNS)
+    writer.writeheader()
+    total_rows = parsed_logs = skipped = 0
+    try:
+        for name in log_names:
+            meta = _meta_from_log_name(name, topo)
+            if meta is None:
+                continue
+            steps = parse_optimizer_steps(os.path.join(out_dir, name))
+            if not steps:
+                print(f"[rebuild]   no [OPTIMIZER STEP] rows in {name}; skipped")
+                skipped += 1
+                continue
+            n_max = steps[0]["interval"]
+            iters = compute_iters(n_max, nodes, batch_size, app_name)
+            base_meta = {
+                "app": app_name, "nodes": nodes, "batch_size": batch_size,
+                "n_max": n_max, "iters": iters, **meta,
+            }
+            for s in steps:
+                row = dict(base_meta)
+                row.update(s)
+                row["perturbed_cap_realized"] = _realized_perturbed_cap(
+                    s["cap_vector"], base_meta["perturbed_device"])
+                writer.writerow(row)
+            total_rows += len(steps)
+            parsed_logs += 1
+    finally:
+        f.close()
+    print(f"[rebuild] {parsed_logs} logs parsed ({skipped} skipped), "
+          f"{total_rows} per-window rows -> {csv_path}")
+
+
+# ---------------------------------------------------------------------------
 # Experiment driver
 # ---------------------------------------------------------------------------
 def run_perturbation_experiments(
@@ -395,27 +499,41 @@ if __name__ == "__main__":
     parser.add_argument(
         "--app",
         choices=["cnn", "rnn", "collatz", "montecarlo", "twinprime", "vecmaxdiv"],
-        default="cnn")
+        default="montecarlo")
     parser.add_argument("--nodes", type=int, default=4,
                         help="Number of nodes in the cluster run")
-    parser.add_argument("--out-dir", default="snr_perturbation_results")
-    parser.add_argument("--batch-size", type=int, default=50)
+    parser.add_argument("--out-dir", default="montecarlo_gpu_snr_perturbation_results")
+    parser.add_argument("--batch-size", type=int, default=240000)
     parser.add_argument("--base-caps", nargs="+", type=float,
-                        default=[0.2, 0.4, 0.6, 0.8])
+                        default=[0.2, 0.5, 0.8])
     parser.add_argument("--epsilons", nargs="+", type=float,
                         default=[0.05, 0.1, 0.2])
-    parser.add_argument("--n-max", type=int, default=40,
+    parser.add_argument("--n-max", type=int, default=20,
                         help="Highest N (optimizer_step_interval); run length is "
                              "iters=compute_iters(n_max,...). Lower N is derived "
                              "offline from the per-window logs.")
-    parser.add_argument("--n-runs", type=int, default=3,
+    parser.add_argument("--n-runs", type=int, default=1,
                         help="Repetitions per (cap, device, eps, sign) cell")
     parser.add_argument("--devices", nargs="+", type=int, default=None,
                         help="Device indices to perturb (default: all discovered)")
     parser.add_argument("--gpu-only", action="store_true",
                         help="Disable CPU devices (perturb GPUs only). Works with "
                              "a single master node holding many GPUs (--nodes 1).")
+    parser.add_argument("--rebuild-csv", action="store_true",
+                        help="Don't run anything: rebuild perturbation_samples.csv "
+                             "from the existing log_*.txt files in --out-dir. "
+                             "--app/--nodes/--batch-size must match the original run "
+                             "(they aren't recorded in the logs).")
     args = parser.parse_args()
+
+    if args.rebuild_csv:
+        rebuild_csv_from_logs(
+            app_name=args.app,
+            batch_size=args.batch_size,
+            nodes=args.nodes,
+            out_dir=args.out_dir,
+        )
+        raise SystemExit(0)
 
     run_perturbation_experiments(
         app_name=args.app,
