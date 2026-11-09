@@ -56,10 +56,20 @@ class RunParameters:
     iters: int | None = None
     # Windows to aggregate per optimizer step (None = 1, i.e. every window)
     optimizer_step_interval: int | None = None
+    # Grid-search parameters (EDP_SEARCH_SHARED / EDP_SEARCH_SPLIT strategies).
+    # Spacing and its per-level decay are derived from grid_points (full-range
+    # grid), so they are not parameters.
+    search_depth: int | None = None
+    search_grid_points: int | None = None
     # Optional per-device starting power caps (fractions of each device's range,
     # 0..1), one per device. Applied for EQUAL_SPLIT / EQUAL_SPLIT_EDP_MONITOR to
     # perturb a single device for SNR diagnostics. None = uniform start_powercap.
     device_powercaps: list[float] | None = None
+    # Independent fixed cap fractions (0..1) for the EDP_MONITOR_SPLIT strategy:
+    # gpu_powercap is applied to every GPU device, cpu_powercap to every CPU device.
+    # None = unset (the C side falls back to start_powercap for that device type).
+    gpu_powercap: float | None = None
+    cpu_powercap: float | None = None
 
 
 @dataclass

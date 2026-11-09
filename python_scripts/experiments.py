@@ -32,13 +32,17 @@ def get_arguments(run_parameters: RunParameters):
 
 def write_powercap_conf(run_parameters: RunParameters, config_path: str = "powercap.conf"):
     assert run_parameters.strategy in [
+        "DISABLED",
         "CONTINUOUS_GREEDY",
         "EQUAL_SPLIT",
         "EQUAL_SPLIT_EDP_MONITOR",
+        "EDP_MONITOR_SPLIT",
         "BINARY_GREEDY",
         "EDP_GRADIENT_SIMPLE",
         "EDP_GRADIENT_SPSA",
         "EDP_GRADIENT_CMAES",
+        "EDP_SEARCH_SHARED",
+        "EDP_SEARCH_SPLIT",
     ], f"Unsupported strategy: {run_parameters.strategy}"
 
     # Base config lines
@@ -81,6 +85,22 @@ def write_powercap_conf(run_parameters: RunParameters, config_path: str = "power
     lines.append(f"edp_optimization_steps={edp_optimization_steps}")
     lines.append(f"optimizer_step_interval={optimizer_step_interval}")
 
+    # Grid-search parameters (only relevant for EDP_SEARCH_* strategies). Defaults
+    # mirror those in the C parser (powercap_config.c).
+    if run_parameters.strategy in ("EDP_SEARCH_SHARED", "EDP_SEARCH_SPLIT"):
+        search_depth = run_parameters.search_depth if run_parameters.search_depth is not None else 3
+        search_grid_points = run_parameters.search_grid_points if run_parameters.search_grid_points is not None else 5
+        lines.append(f"search_depth={search_depth}")
+        lines.append(f"search_grid_points={search_grid_points}")
+
+    # Independent fixed GPU/CPU cap fractions (only for EDP_MONITOR_SPLIT). Emit each
+    # only if provided; an omitted one falls back to start_powercap on the C side.
+    if run_parameters.strategy == "EDP_MONITOR_SPLIT":
+        if run_parameters.gpu_powercap is not None:
+            lines.append(f"gpu_powercap={run_parameters.gpu_powercap}")
+        if run_parameters.cpu_powercap is not None:
+            lines.append(f"cpu_powercap={run_parameters.cpu_powercap}")
+
     # Optional per-device cap override (perturb a single device for SNR tests)
     if run_parameters.device_powercaps:
         caps_csv = ",".join(f"{c:.4f}" for c in run_parameters.device_powercaps)
@@ -99,7 +119,7 @@ def single_app_run(run_parameters: RunParameters, log_save_path: str | None = "l
     command = f"./run_scripts/run-app {run_parameters.app_name} B {run_parameters.number_od_nodes} {arguments}"
     log(command)
     try:
-        result = subprocess.run(command.split(" "), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True, timeout=5000)
+        result = subprocess.run(command.split(" "), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True, timeout=15000)
     except Exception as e:
         result = None
         log(f"An error occurred while executing the command: {e}")
@@ -108,7 +128,7 @@ def single_app_run(run_parameters: RunParameters, log_save_path: str | None = "l
         log("Error encountered when launching application")
         try:
             time.sleep(10)
-            result = subprocess.run(command.split(" "), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True, timeout=5000)
+            result = subprocess.run(command.split(" "), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True, timeout=15000)
         except Exception as e:
             result = None
             log(f"An error occurred while executing the command: {e}")

@@ -12,6 +12,11 @@ typedef struct {
     float gpu_min_powercap;      // minimum GPU power cap (for continuous strategy)
     float start_powercap;        // starting power cap (for gradient optimization)
     float global_powercap;       // global power cap in Watts (0 means disabled)
+    // Independent fixed cap fractions (0..1) for EDP_MONITOR_SPLIT: gpu_powercap is
+    // applied to every GPU device, cpu_powercap to every CPU device. -1 means unset
+    // (fall back to start_powercap for that device type).
+    float gpu_powercap;
+    float cpu_powercap;
     // Gradient optimisation parameters (used for EDP_GRADIENT_* strategies)
     float start_alpha;           // initial learning rate (default 2.0)
     float alpha_decay;           // learning rate decay per iteration (default 0.99)
@@ -28,6 +33,11 @@ typedef struct {
     // device_powercaps_count == 0 means "not specified" (uniform caps as before).
     float device_powercaps[__CUDAMPI_MAX_THREAD_COUNT];
     int device_powercaps_count;
+    // Grid-search parameters (used for EDP_SEARCH_SHARED / EDP_SEARCH_SPLIT).
+    // The grid spans the full range with spacing derived from grid_points, so
+    // spacing and its per-level decay are not configurable.
+    int search_depth;          // number of refinement levels (default 3)
+    int search_grid_points;    // grid points per axis (default 5)
 } powercap_config_t;
 
 // Loads configuration from a simple key=value file.

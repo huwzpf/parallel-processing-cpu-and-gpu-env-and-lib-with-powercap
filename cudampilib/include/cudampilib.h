@@ -31,7 +31,17 @@ typedef enum {
   EDP_GRADIENT_CMAES,
   // Behaves like EQUAL_SPLIT (fixed equal caps) but runs the power capping
   // manager every sync window to measure and log EDP samples without optimizing.
-  EQUAL_SPLIT_EDP_MONITOR
+  EQUAL_SPLIT_EDP_MONITOR,
+  // Grid-search EDP minimisation. SHARED uses a single power-cap fraction for all
+  // devices (like EQUAL_SPLIT); SPLIT searches a 2D grid of {GPU fraction, CPU
+  // fraction}. Both refine around the best cell with a shrinking step for a
+  // configurable number of levels (search_depth).
+  EDP_SEARCH_SHARED,
+  EDP_SEARCH_SPLIT,
+  // Fixed caps like EQUAL_SPLIT_EDP_MONITOR (per-window EDP logging, no optimizer
+  // step) but with independent GPU and CPU cap fractions (gpu_powercap /
+  // cpu_powercap). Used to sweep the GPU x CPU cap space for the best fixed config.
+  EDP_MONITOR_SPLIT
 } powercapStrategy_t;
 
 extern __global__ void kernel(long *devPtr);

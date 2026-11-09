@@ -23,6 +23,9 @@ int load_powercap_config(const char *path, powercap_config_t *config) {
     config->gpu_min_powercap = 0.0;
     config->start_powercap = 0.5;
     config->global_powercap = 0.0f; // disabled by default
+    // Independent fixed GPU/CPU cap fractions for EDP_MONITOR_SPLIT (-1 = unset)
+    config->gpu_powercap = -1.0f;
+    config->cpu_powercap = -1.0f;
     config->start_alpha = 2.0f;     // default START_ALPHA
     config->alpha_decay = 0.99f;    // default ALPHA_DECAY
     config->epsilon_decay = 0.99f;  // default EPSILON_DECAY
@@ -35,6 +38,9 @@ int load_powercap_config(const char *path, powercap_config_t *config) {
     config->optimizer_step_interval = 1ULL;
     // Default: no per-device cap override (uniform caps)
     config->device_powercaps_count = 0;
+    // Grid-search defaults
+    config->search_depth = 3;
+    config->search_grid_points = 5;
 
     FILE *f = fopen(path, "r");
     if (!f) {
@@ -72,6 +78,12 @@ int load_powercap_config(const char *path, powercap_config_t *config) {
                     config->strategy = EDP_GRADIENT_SPSA;
                 } else if (strcmp(value, "EDP_GRADIENT_CMAES") == 0) {
                     config->strategy = EDP_GRADIENT_CMAES;
+                } else if (strcmp(value, "EDP_SEARCH_SHARED") == 0) {
+                    config->strategy = EDP_SEARCH_SHARED;
+                } else if (strcmp(value, "EDP_SEARCH_SPLIT") == 0) {
+                    config->strategy = EDP_SEARCH_SPLIT;
+                } else if (strcmp(value, "EDP_MONITOR_SPLIT") == 0) {
+                    config->strategy = EDP_MONITOR_SPLIT;
                 }
             } else if (strcmp(key, "cpu_min_powercap") == 0) {
                 config->cpu_min_powercap = (float)atof(value);
@@ -79,6 +91,10 @@ int load_powercap_config(const char *path, powercap_config_t *config) {
                 config->gpu_min_powercap = (float)atof(value);
             } else if (strcmp(key, "start_powercap") == 0) {
                 config->start_powercap = (float)atof(value);
+            } else if (strcmp(key, "gpu_powercap") == 0) {
+                config->gpu_powercap = (float)atof(value);
+            } else if (strcmp(key, "cpu_powercap") == 0) {
+                config->cpu_powercap = (float)atof(value);
             } else if (strcmp(key, "start_alpha") == 0) {
                 config->start_alpha = (float)atof(value);
             } else if (strcmp(key, "alpha_decay") == 0) {
@@ -110,6 +126,12 @@ int load_powercap_config(const char *path, powercap_config_t *config) {
                     tok = strtok_r(NULL, ",", &saveptr);
                 }
                 config->device_powercaps_count = count;
+            } else if (strcmp(key, "search_depth") == 0) {
+                config->search_depth = atoi(value);
+                if (config->search_depth < 1) config->search_depth = 1;
+            } else if (strcmp(key, "search_grid_points") == 0) {
+                config->search_grid_points = atoi(value);
+                if (config->search_grid_points < 2) config->search_grid_points = 2;
             }
             // Unknown keys are ignored to keep parser extendable
         }

@@ -513,10 +513,24 @@ def plot_snr_results(results: dict, out_dir: str = "snr_results") -> None:
             sub_N = estimates[estimates["optimizer_step_interval"] == N]
             for bs in sorted(sub_N["batch_size"].unique()):
                 sub = sub_N[sub_N["batch_size"] == bs]
+                # Shared bin edges across all caps so bar heights are comparable.
+                # Per-cap bins (count // 4 over each cap's own range) gave every cap
+                # a different bin width, so concentrated caps and caps with a wide
+                # range (outliers) looked taller/shorter regardless of sample count.
+                # Robust range (0.5–99.5 pct of the pooled estimates) keeps a few
+                # outliers from stretching the bins; a fixed bin count keeps widths
+                # equal across caps.
+                all_vals = sub["edp"].values
+                lo, hi = np.percentile(all_vals, [0.5, 99.5])
+                if not (np.isfinite(lo) and np.isfinite(hi)) or hi <= lo:
+                    lo, hi = float(np.min(all_vals)), float(np.max(all_vals))
+                    if hi <= lo:
+                        hi = lo + 1.0
+                bins = np.linspace(lo, hi, 81)
                 fig, ax = plt.subplots(figsize=(8, 4))
                 for cap in sorted(sub["base_cap"].unique()):
                     edp_vals = sub[sub["base_cap"] == cap]["edp"].values
-                    ax.hist(edp_vals, bins=max(5, len(edp_vals) // 4 + 1),
+                    ax.hist(edp_vals, bins=bins,
                             alpha=0.55, label=f"cap={cap:.2f} (n={len(edp_vals)})")
                 ax.set_xlabel("EDP estimate")
                 ax.set_ylabel("Count")
@@ -653,23 +667,26 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    # Run the identical experiment + plotting pipeline once per node count,
-    # writing each into its own directory (e.g. snr_results_4_nodes).
-    for nodes in args.nodes:
-        node_out_dir = f"{args.app}_{args.out_dir}_{nodes}_nodes"
-        print(f"\n[SNR] ===== node count = {nodes} -> {node_out_dir} =====")
+    if args.plots_only:
+        results = load_results(out_dir=args.out_dir)
+        plot_snr_results(results, out_dir=args.out_dir)  
+        
+    elif args.from_logs:
+        estimates = build_estimates_from_logs(
+            out_dir=args.out_dir,
+            n_values=args.n_values,
+            app_name=args.app,
+            number_od_nodes=args.nodes,
+        )
+        results = process_snr_results(estimates, out_dir=args.out_dir)
+        plot_snr_results(results, out_dir=args.out_dir)  
+    else:
+        # Run the identical experiment + plotting pipeline once per node count,
+        # writing each into its own directory (e.g. snr_results_4_nodes).
+        for nodes in args.nodes:
+            node_out_dir = f"{args.app}_{args.out_dir}_{nodes}_nodes"
+            print(f"\n[SNR] ===== node count = {nodes} -> {node_out_dir} =====")
 
-        if args.plots_only:
-            results = load_results(out_dir=node_out_dir)
-        elif args.from_logs:
-            estimates = build_estimates_from_logs(
-                out_dir=node_out_dir,
-                n_values=args.n_values,
-                app_name=args.app,
-                number_od_nodes=nodes,
-            )
-            results = process_snr_results(estimates, out_dir=node_out_dir)
-        else:
             results = run_snr_experiments(
                 app_name=args.app,
                 batch_sizes=args.batch_sizes,
@@ -680,4 +697,4 @@ if __name__ == "__main__":
                 number_od_nodes=nodes,
                 cpu_enabled=not args.gpu_only,
             )
-        plot_snr_results(results, out_dir=node_out_dir)
+            plot_snr_results(results, out_dir=node_out_dir)

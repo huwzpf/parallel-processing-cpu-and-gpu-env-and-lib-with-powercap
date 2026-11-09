@@ -28,8 +28,15 @@ spsaGradientOpt_t __cudampi__spsaGradientOpt;
 spsaAdaptiveOpt_t __cudampi__spsaAdaptiveOpt;
 simpleAdaptiveOpt_t __cudampi__simpleAdaptiveOpt;
 cmaesOpt_t __cudampi__cmaesOpt;
+searchOpt_t __cudampi__searchOpt;
 // Flag set by gradient optimizers when a full update (descent / CMA update) occurred
 static int __cudampi__grad_update_performed = 0;
+
+// Grid-search runtime parameters (configurable via powercap.conf). The grid spans
+// the full normalized range with spacing derived from npoints, so spacing and its
+// per-level decay are not free parameters (see __cudampi__gridSearchStep).
+int __cudampi__search_depth = 3;
+int __cudampi__search_grid_points = 5;
 
 // Values below are expressed in terms of possible power cap range
 // i.e. if min possible power cap is 100W and max is 250W, then 0.25 means 100W + 0.25 * (250W - 100W) = 137.5W
@@ -50,6 +57,12 @@ unsigned long long __cudampi__optimizer_step_interval = 1ULL;
 // be perturbed (used by the SNR diagnostic collector). 0 means "not specified".
 float __cudampi__deviceCapOverride[__CUDAMPI_MAX_THREAD_COUNT];
 int __cudampi__deviceCapOverrideCount = 0;
+
+// Independent fixed cap fractions (0..1) for EDP_MONITOR_SPLIT. gpu_powercap is
+// applied to every GPU device, cpu_powercap to every CPU device. -1 means unset
+// (fall back to __cudampi__gradient_opt_start_powercap for that device type).
+float __cudampi__gpu_powercap = -1.0f;
+float __cudampi__cpu_powercap = -1.0f;
 
 // Gradient optimisation runtime parameters (configurable via powercap.conf)
 float __cudampi__gradient_start_alpha = 2.0f;
@@ -73,7 +86,9 @@ float getFreePowerCap(int index) {
 static int __cudampi__isDynamicEdpStrategy(void) {
   return __cudampi__powercapStrategy == EDP_GRADIENT_SIMPLE ||
          __cudampi__powercapStrategy == EDP_GRADIENT_SPSA ||
-         __cudampi__powercapStrategy == EDP_GRADIENT_CMAES;
+         __cudampi__powercapStrategy == EDP_GRADIENT_CMAES ||
+         __cudampi__powercapStrategy == EDP_SEARCH_SHARED ||
+         __cudampi__powercapStrategy == EDP_SEARCH_SPLIT;
 }
 
 static double __cudampi__clamp01(double v) {
@@ -149,9 +164,12 @@ void __cudampi__applyAllPowercaps(void) {
       __cudampi__powercapStrategy == EQUAL_SHARE_CONTINUOUS_GREEDY ||
       __cudampi__powercapStrategy == EQUAL_SPLIT ||
       __cudampi__powercapStrategy == EQUAL_SPLIT_EDP_MONITOR ||
+      __cudampi__powercapStrategy == EDP_MONITOR_SPLIT ||
       __cudampi__powercapStrategy == EDP_GRADIENT_SIMPLE ||
       __cudampi__powercapStrategy == EDP_GRADIENT_SPSA ||
-      __cudampi__powercapStrategy == EDP_GRADIENT_CMAES) {
+      __cudampi__powercapStrategy == EDP_GRADIENT_CMAES ||
+      __cudampi__powercapStrategy == EDP_SEARCH_SHARED ||
+      __cudampi__powercapStrategy == EDP_SEARCH_SPLIT) {
     for (int i = 0; i < __cudampi_totaldevicecount; i++) {
       if (__cudampi__devicePowerConfig[i].currentPowerCap != -1) {
         setDevicePowerCap(i);
@@ -801,7 +819,151 @@ void __cudampi__gradientOptStepSimple() {
   }
 }
 
-int __cudampi__selectpowercap_gradient() {                 
+//
+// Grid-search EDP minimisation.
+//
+// The search evaluates a grid of power-cap settings sequentially (one grid point
+// per optimiser step, reusing the same one-call lag as the gradient strategies:
+// each call reads __cudampi__edp produced by the caps applied on the previous
+// call).
+//
+// Level 0 spans the full normalized range [0,1] with npoints equally spaced
+// points (spacing = 1/npoints, centred at 0.5): e.g. npoints=5 -> 0.1,0.3,..,0.9.
+// After a level is evaluated, the best (lowest-EDP) point becomes the new centre
+// and the interval between its two neighbours is subdivided into npoints interior
+// points (endpoints excluded) for the next level. That subdivision is exactly a
+// spacing shrink by 2/(npoints+1), so the grid resolution is the only knob; there
+// is no separate eps / eps_decay. After search_depth levels the best caps are held.
+//
+// dims == 1 (EDP_SEARCH_SHARED): a single fraction applied to all devices.
+// dims == 2 (EDP_SEARCH_SPLIT):  axis[0] = GPU fraction, axis[1] = CPU fraction.
+//
+
+// Map a flat grid index k to per-axis normalized coordinates around the centre.
+static void __cudampi__searchAxisForK(searchOpt_t* g, int k, double out[2]) {
+  double half = (g->npoints - 1) / 2.0;
+  if (g->dims == 1) {
+    out[0] = g->center[0] + ((double)k - half) * g->spacing;
+    out[1] = out[0];
+  } else {
+    int idxGpu = k % g->npoints;
+    int idxCpu = k / g->npoints;
+    out[0] = g->center[0] + ((double)idxGpu - half) * g->spacing;
+    out[1] = g->center[1] + ((double)idxCpu - half) * g->spacing;
+  }
+}
+
+// Push the given per-axis fractions to all devices (clamped per device type).
+static void __cudampi__searchApplyAxis(searchOpt_t* g, const double axis[2]) {
+  for (int i = 0; i < __cudampi_totaldevicecount; i++) {
+    int isGpu = (i < __cudampi_totalgpudevicecount);
+    double a = (g->dims == 1) ? axis[0] : (isGpu ? axis[0] : axis[1]);
+    double p = __cudampi__clampNormForDevice(i, a);
+    double minv = __cudampi__devicePowerConfig[i].powercapRange.min;
+    double maxv = __cudampi__devicePowerConfig[i].powercapRange.max;
+    double vcap = __cudampi__norm_to_cap(p, minv, maxv);
+    __cudampi__updatePowerCap((float)vcap, i);
+  }
+}
+
+static void __cudampi__searchApplyK(searchOpt_t* g, int k) {
+  double axis[2];
+  __cudampi__searchAxisForK(g, k, axis);
+  if (g->dims == 1) {
+    log_message(LOG_INFO, "SEARCH: level=%d point %d/%d shared=%.4f spacing=%.4f",
+                g->level, k, g->total, axis[0], g->spacing);
+  } else {
+    log_message(LOG_INFO, "SEARCH: level=%d point %d/%d gpu=%.4f cpu=%.4f spacing=%.4f",
+                g->level, k, g->total, axis[0], axis[1], g->spacing);
+  }
+  __cudampi__searchApplyAxis(g, axis);
+}
+
+// Set grid point-0 caps as each device's initial currentPowerCap WITHOUT pushing
+// them to the devices. Used at init time only: __cudampi__applyInitialPowercapsForStrategy
+// runs before the MPI communicators are allocated, so a setDevicePowerCap() MPI_Send
+// to a slave would dereference a null communicator. The deferred push happens in
+// __cudampi__applyAllPowercaps(), exactly like the gradient strategies.
+static void __cudampi__searchInitCaps(searchOpt_t* g) {
+  double axis[2];
+  __cudampi__searchAxisForK(g, 0, axis);
+  for (int i = 0; i < __cudampi_totaldevicecount; i++) {
+    int isGpu = (i < __cudampi_totalgpudevicecount);
+    double a = (g->dims == 1) ? axis[0] : (isGpu ? axis[0] : axis[1]);
+    double p = __cudampi__clampNormForDevice(i, a);
+    double minv = __cudampi__devicePowerConfig[i].powercapRange.min;
+    double maxv = __cudampi__devicePowerConfig[i].powercapRange.max;
+    double vcap = __cudampi__norm_to_cap(p, minv, maxv);
+    // Match __cudampi__updatePowerCap's dynamic-strategy clamp (floor at minPowerCap).
+    if (vcap < __cudampi__devicePowerConfig[i].minPowerCap) {
+      vcap = __cudampi__devicePowerConfig[i].minPowerCap;
+    } else if (vcap > __cudampi__devicePowerConfig[i].powercapRange.max) {
+      vcap = __cudampi__devicePowerConfig[i].powercapRange.max;
+    }
+    __cudampi__devicePowerConfig[i].currentPowerCap = (float)vcap;
+  }
+}
+
+void __cudampi__gridSearchStep() {
+  searchOpt_t* g = &__cudampi__searchOpt;
+
+  if (g->terminated || g->mode == SEARCH_DONE) {
+    // Best caps already held; nothing more to change.
+    return;
+  }
+
+  // mode == SEARCH_EVAL: __cudampi__edp is the result of grid point g->k.
+  double J = __cudampi__edp;
+  double axis[2];
+  __cudampi__searchAxisForK(g, g->k, axis);
+  log_message(LOG_INFO, "SEARCH: eval level=%d point %d/%d J=%.8f (gpu=%.4f cpu=%.4f)",
+              g->level, g->k, g->total, J, axis[0], axis[1]);
+
+  if (J > 0.0 && (!g->have_best || J < g->bestJ)) {
+    g->bestJ = J;
+    g->best_axis[0] = axis[0];
+    g->best_axis[1] = axis[1];
+    g->have_best = 1;
+  }
+
+  g->k += 1;
+  if (g->k < g->total) {
+    __cudampi__searchApplyK(g, g->k);
+    return;
+  }
+
+  // Level complete: recentre on the best point found.
+  if (g->have_best) {
+    g->center[0] = __cudampi__clamp01(g->best_axis[0]);
+    g->center[1] = __cudampi__clamp01(g->best_axis[1]);
+  }
+  log_message(LOG_INFO, "SEARCH: level=%d complete bestJ=%.8f centre gpu=%.4f cpu=%.4f",
+              g->level, g->bestJ, g->center[0], g->center[1]);
+  // Count one completed refinement level as an optimisation update.
+  __cudampi__grad_update_performed = 1;
+
+  g->level += 1;
+  if (g->level >= g->depth) {
+    // Max depth reached: hold the best caps and stop.
+    log_message(LOG_INFO, "SEARCH: max depth %d reached, holding best caps (gpu=%.4f cpu=%.4f J=%.8f)",
+                g->depth, g->center[0], g->center[1], g->bestJ);
+    g->terminated = 1;
+    g->mode = SEARCH_DONE;
+    __cudampi__searchApplyAxis(g, g->center);
+    return;
+  }
+
+  // Refine: subdivide the interval between the best point's two neighbours into
+  // npoints interior points around the new centre. That is a spacing shrink of
+  // 2/(npoints+1) (e.g. npoints=5: 0.2 -> 0.0667, so a best of 0.3 is searched
+  // over 0.1667..0.4333, strictly inside its old neighbours 0.1 and 0.5).
+  g->spacing *= 2.0 / (double)(g->npoints + 1);
+  g->have_best = 0;
+  g->k = 0;
+  __cudampi__searchApplyK(g, 0);
+}
+
+int __cudampi__selectpowercap_gradient() {
   omp_set_lock(&deviceselectionlock);
  
   int allpowerset = 1;
@@ -818,6 +980,9 @@ int __cudampi__selectpowercap_gradient() {
     __cudampi__gradientOptStepSpsa();
   } else if (__cudampi__powercapStrategy == EDP_GRADIENT_CMAES) {
     __cudampi__gradientOptStepCmaes();
+  } else if (__cudampi__powercapStrategy == EDP_SEARCH_SHARED ||
+             __cudampi__powercapStrategy == EDP_SEARCH_SPLIT) {
+    __cudampi__gridSearchStep();
   }
 
   omp_unset_lock(&deviceselectionlock);
@@ -1219,6 +1384,15 @@ void __cudampi__loadAndLogPowercapConfig(void) {
       __cudampi__optimizer_step_interval = file_config.optimizer_step_interval > 0 ? file_config.optimizer_step_interval : 1ULL;
       __cudampi__cpu_min_powercap = file_config.cpu_min_powercap > 0.0f ? file_config.cpu_min_powercap : 0.10f;
       __cudampi__gpu_min_powercap = file_config.gpu_min_powercap > 0.0f ? file_config.gpu_min_powercap : 0.10f;
+    } else if (file_config.strategy == EDP_MONITOR_SPLIT) {
+      // Like EQUAL_SPLIT_EDP_MONITOR, but with independent GPU / CPU fixed caps.
+      __cudampi__globalpowerlimit = 0;
+      __cudampi__gradient_opt_start_powercap = file_config.start_powercap;
+      __cudampi__gpu_powercap = file_config.gpu_powercap;
+      __cudampi__cpu_powercap = file_config.cpu_powercap;
+      __cudampi__optimizer_step_interval = file_config.optimizer_step_interval > 0 ? file_config.optimizer_step_interval : 1ULL;
+      __cudampi__cpu_min_powercap = file_config.cpu_min_powercap > 0.0f ? file_config.cpu_min_powercap : 0.10f;
+      __cudampi__gpu_min_powercap = file_config.gpu_min_powercap > 0.0f ? file_config.gpu_min_powercap : 0.10f;
     } else if (file_config.strategy == EDP_GRADIENT_SIMPLE || file_config.strategy == EDP_GRADIENT_SPSA || file_config.strategy == EDP_GRADIENT_CMAES) {
       __cudampi__globalpowerlimit = 0;
       __cudampi__gradient_opt_start_powercap = file_config.start_powercap;
@@ -1230,6 +1404,14 @@ void __cudampi__loadAndLogPowercapConfig(void) {
       __cudampi__optimizer_step_interval = file_config.optimizer_step_interval > 0 ? file_config.optimizer_step_interval : 1ULL;
       __cudampi__cpu_min_powercap = file_config.cpu_min_powercap > 0.0f ? file_config.cpu_min_powercap : 0.10f;
       __cudampi__gpu_min_powercap = file_config.gpu_min_powercap > 0.0f ? file_config.gpu_min_powercap : 0.10f;
+    } else if (file_config.strategy == EDP_SEARCH_SHARED || file_config.strategy == EDP_SEARCH_SPLIT) {
+      __cudampi__globalpowerlimit = 0;
+      __cudampi__gradient_opt_start_powercap = file_config.start_powercap;
+      __cudampi__optimizer_step_interval = file_config.optimizer_step_interval > 0 ? file_config.optimizer_step_interval : 1ULL;
+      __cudampi__cpu_min_powercap = file_config.cpu_min_powercap > 0.0f ? file_config.cpu_min_powercap : 0.10f;
+      __cudampi__gpu_min_powercap = file_config.gpu_min_powercap > 0.0f ? file_config.gpu_min_powercap : 0.10f;
+      __cudampi__search_depth = file_config.search_depth;
+      __cudampi__search_grid_points = file_config.search_grid_points;
     }
     __cudampi__cpu_time_window_us = file_config.cpu_time_window_us;
     // Copy optional per-device cap override (used by EQUAL_SPLIT / EDP_MONITOR)
@@ -1297,6 +1479,19 @@ void __cudampi__loadAndLogPowercapConfig(void) {
       log_message(LOG_INFO, "CMA-ES params: start_powercap=%f, sigma0~eps=%f", __cudampi__gradient_opt_start_powercap, __cudampi__gradient_opt_eps);
       log_message(LOG_INFO, "Dynamic lower bounds: cpu_min_powercap=%f gpu_min_powercap=%f", __cudampi__cpu_min_powercap, __cudampi__gpu_min_powercap);
       log_message(LOG_INFO, "EDP optimisation steps limit: %llu (0=unlimited)", __cudampi__edp_optimization_steps);
+      break;
+    case EDP_MONITOR_SPLIT:
+      log_message(LOG_INFO, "Powercap strategy: EDP_MONITOR_SPLIT (fixed independent GPU/CPU caps, EDP logging only)");
+      log_message(LOG_INFO, "gpu_powercap (part of range): %f (-1=unset->start_powercap)", __cudampi__gpu_powercap);
+      log_message(LOG_INFO, "cpu_powercap (part of range): %f (-1=unset->start_powercap)", __cudampi__cpu_powercap);
+      log_message(LOG_INFO, "start_powercap fallback (part of range): %f", __cudampi__gradient_opt_start_powercap);
+      break;
+    case EDP_SEARCH_SHARED:
+    case EDP_SEARCH_SPLIT:
+      log_message(LOG_INFO, "Powercap strategy: %s", __cudampi__powercapStrategy == EDP_SEARCH_SPLIT ? "EDP_SEARCH_SPLIT (2D GPU/CPU grid)" : "EDP_SEARCH_SHARED (1D shared grid)");
+      log_message(LOG_INFO, "Search params: depth=%d, grid_points=%d (full-range grid: spacing=1/gp, refine x2/(gp+1))",
+                  __cudampi__search_depth, __cudampi__search_grid_points);
+      log_message(LOG_INFO, "Dynamic lower bounds: cpu_min_powercap=%f gpu_min_powercap=%f", __cudampi__cpu_min_powercap, __cudampi__gpu_min_powercap);
       break;
     default:
       log_message(LOG_INFO, "Powercap strategy: UNKNOWN (%d)", __cudampi__powercapStrategy);
@@ -1408,6 +1603,37 @@ static void __cudampi__initCmaes(void) {
   free(stddev);
 }
 
+static void __cudampi__initSearch(void) {
+  searchOpt_t* g = &__cudampi__searchOpt;
+  // SPLIT searches a GPU axis and a CPU axis (2D). With no CPU devices (GPU-only
+  // run) the CPU axis has no effect, so collapse to a 1D search to avoid wasting
+  // npoints x the evaluations on a redundant axis.
+  int hasCpu = (__cudampi_totaldevicecount > __cudampi_totalgpudevicecount);
+  g->dims = (__cudampi__powercapStrategy == EDP_SEARCH_SPLIT && hasCpu) ? 2 : 1;
+  g->npoints = __cudampi__search_grid_points >= 2 ? __cudampi__search_grid_points : 2;
+  g->depth = __cudampi__search_depth >= 1 ? __cudampi__search_depth : 1;
+  // Level 0 covers the full normalized range [0,1], centred at 0.5 with spacing
+  // 1/npoints, so the points are the npoints equal-bin midpoints (e.g. npoints=5
+  // -> 0.1,0.3,0.5,0.7,0.9). Per-device lower bounds are applied via clamping.
+  g->spacing = 1.0 / (double)g->npoints;
+  g->center[0] = 0.5;
+  g->center[1] = 0.5;
+  g->level = 0;
+  g->total = (g->dims == 2) ? (g->npoints * g->npoints) : g->npoints;
+  g->k = 0;
+  g->bestJ = 0.0;
+  g->have_best = 0;
+  g->terminated = 0;
+  g->mode = SEARCH_EVAL;
+
+  log_message(LOG_INFO, "SEARCH: init dims=%d npoints=%d depth=%d spacing0=%.4f (full-range grid, centre=0.5) total/level=%d",
+              g->dims, g->npoints, g->depth, g->spacing, g->total);
+  // Seed grid point 0 as the initial caps (field only; pushed later by
+  // __cudampi__applyAllPowercaps once communicators exist) so the first optimiser
+  // step measures point 0's EDP.
+  __cudampi__searchInitCaps(g);
+}
+
 void __cudampi__applyInitialPowercapsForStrategy(void) {
   if (__cudampi__powercapStrategy == DISABLED) {
     return;
@@ -1457,6 +1683,31 @@ void __cudampi__applyInitialPowercapsForStrategy(void) {
     }
   }
 
+  if (__cudampi__powercapStrategy == EDP_MONITOR_SPLIT) {
+    // Independent fixed caps: every GPU device to gpu_powercap, every CPU device to
+    // cpu_powercap. An unset fraction (< 0) falls back to the uniform start cap.
+    for (int i = 0; i < __cudampi_totaldevicecount; i++) {
+      int isGPU = (i < __cudampi_totalgpudevicecount);
+      float frac = isGPU ? __cudampi__gpu_powercap : __cudampi__cpu_powercap;
+      if (frac < 0.0f) {
+        frac = __cudampi__gradient_opt_start_powercap;
+      }
+      float lowerPowerCap = (float)__cudampi__deviceLowerNorm(i);
+      if (frac < lowerPowerCap) {
+        frac = lowerPowerCap;
+      }
+      if (frac > 1.0f) {
+        frac = 1.0f;
+      }
+      __cudampi__devicePowerConfig[i].currentPowerCap = getPowerCapFromRange(
+        __cudampi__devicePowerConfig[i].powercapRange.min,
+        __cudampi__devicePowerConfig[i].powercapRange.max,
+        frac);
+      log_message(LOG_INFO, "[MONITOR SPLIT] %s device %d set to fraction %.4f -> %.3f W",
+                  isGPU ? "GPU" : "CPU", i, frac, __cudampi__devicePowerConfig[i].currentPowerCap);
+    }
+  }
+
   if (
       __cudampi__powercapStrategy == EDP_GRADIENT_SIMPLE ||
       __cudampi__powercapStrategy == EDP_GRADIENT_SPSA ||
@@ -1471,6 +1722,12 @@ void __cudampi__applyInitialPowercapsForStrategy(void) {
     if (__cudampi__powercapStrategy == EDP_GRADIENT_CMAES) {
       __cudampi__initCmaes();
     }
+  }
+
+  if (__cudampi__powercapStrategy == EDP_SEARCH_SHARED ||
+      __cudampi__powercapStrategy == EDP_SEARCH_SPLIT) {
+    // initSearch sets currentPowerCap for every device to the first grid point.
+    __cudampi__initSearch();
   }
 
   if ((__cudampi__powercapStrategy == CONTINUOUS_GREEDY || __cudampi__powercapStrategy == EQUAL_SHARE_CONTINUOUS_GREEDY) && __cudampi__globalpowerlimit > 0.0f) {
@@ -1578,7 +1835,10 @@ void __cudampi__powercappingManagerStep(void) {
       __cudampi__powercapStrategy == EDP_GRADIENT_SIMPLE ||
       __cudampi__powercapStrategy == EDP_GRADIENT_SPSA ||
       __cudampi__powercapStrategy == EDP_GRADIENT_CMAES ||
-      __cudampi__powercapStrategy == EQUAL_SPLIT_EDP_MONITOR) {
+      __cudampi__powercapStrategy == EDP_SEARCH_SHARED ||
+      __cudampi__powercapStrategy == EDP_SEARCH_SPLIT ||
+      __cudampi__powercapStrategy == EQUAL_SPLIT_EDP_MONITOR ||
+      __cudampi__powercapStrategy == EDP_MONITOR_SPLIT) {
     static unsigned long long edp_opt_iterations = 0ULL; // number of completed optimisation updates
     static int edp_opt_limit_logged = 0;                 // avoid spamming logs when limit reached
     static unsigned long long edp_window_count = 0ULL;   // total sync windows seen

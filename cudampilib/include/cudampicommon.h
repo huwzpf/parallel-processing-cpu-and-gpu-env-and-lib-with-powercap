@@ -157,6 +157,29 @@ typedef struct {
     double x_in_bounds[__CUDAMPI_MAX_THREAD_COUNT];
 } cmaesOpt_t;
 
+typedef enum {
+    SEARCH_EVAL,   /* sequentially evaluating grid points of the current level */
+    SEARCH_DONE    /* max depth reached: best caps held, no further changes */
+} searchState_t;
+
+typedef struct {
+    /* config */
+    int     dims;            /* 1 = shared (one axis), 2 = split (GPU axis, CPU axis) */
+    int     npoints;         /* grid points per axis */
+    int     depth;           /* number of refinement levels */
+    /* state */
+    int     level;           /* current refinement level (0-based) */
+    double  spacing;         /* current grid spacing (level 0: 1/npoints, x2/(npoints+1) per level) */
+    double  center[2];       /* current centre per axis: [0]=GPU(or shared), [1]=CPU */
+    int     total;           /* number of grid points this level = npoints^dims */
+    int     k;               /* index of the grid point currently being evaluated */
+    double  bestJ;           /* best (lowest) EDP found in the current level */
+    double  best_axis[2];    /* axis coordinates of the best point in current level */
+    int     have_best;       /* whether bestJ/best_axis are valid this level */
+    searchState_t mode;
+    int     terminated;      /* set once max depth reached */
+} searchOpt_t;
+
 float computeDevPerformance(double period_us);
 
 cudaError_t getGpuEnergyUsed(int gpuid, unsigned long long *last_energy_mj, float *energy_used_j);
