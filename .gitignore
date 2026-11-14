@@ -14,3 +14,4 @@ build
 actparcmaes.par
 cudampilib/hostfile
 cudampilib/temp_hostfile
+results/
