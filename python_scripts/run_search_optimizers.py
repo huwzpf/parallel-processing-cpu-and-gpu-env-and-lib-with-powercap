@@ -85,9 +85,9 @@ DEFAULT_BATCHES_PER_WINDOW_PER_DEVICE = 80
 # GPU-only; the CNN/RNN apps run across CPU + GPU. Batch size and batches/window
 # are taken from the per-app defaults above.
 APPS = [
-    # {"name": "montecarlo", "cpu_enabled": False},
+    {"name": "montecarlo", "cpu_enabled": False},
     # {"name": "rnn", "cpu_enabled": True},
-    {"name": "cnn", "cpu_enabled": True},
+    # {"name": "cnn", "cpu_enabled": True},
 ]
 
 # GPUs exposed per node (this cluster: one GPU per node, on every node).

@@ -138,7 +138,8 @@ def log_name(cfg: dict) -> str:
 def main():
     parser = argparse.ArgumentParser(
         description="RNN dynamic-EDP optimizer hyperparameter sweep")
-    parser.add_argument("--out-dir", default="rnn_optimizer_sweep")
+    parser.add_argument("--out-dir", default=os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "..", "results", "optimizer_sweep", "rnn_optimizer_sweep"))
     parser.add_argument("--no-baseline", action="store_true",
                         help="Skip the per-cap EQUAL_SPLIT reference runs")
     args = parser.parse_args()
