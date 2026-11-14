@@ -12,7 +12,41 @@ VECADD_DIR="vecadd"
 VECMAXDIV_DIR="vecmaxdiv"
 MONTECARLO_DIR="montecarlo"
 
-GENERIC_FLAGS="-I/usr/local/cuda-13.0/targets/x86_64-linux/include -Iinclude -L/usr/local/cuda-13.0/targets/x86_64-linux/lib -lcudart -lstdc++ -lm -Wl,-l:libnvidia-ml.so.1"
+# --- Toolchain locations (each can be overridden from the environment) ---
+# The first existing directory in each list wins.
+first_dir() { for d in "$@"; do [ -n "$d" ] && [ -d "$d" ] && { echo "$d"; return; }; done; }
+
+# CUDA toolkit. cuDNN in $HOME/cudnn is the CUDA 13 build, so prefer a 13.x toolkit.
+# CUDA 13.0 does not compile against glibc 2.43 (Ubuntu 26.04); 13.2 does.
+CUDA_HOME="$(first_dir "$CUDA_HOME" "$HOME/local/cuda-13.2" /usr/local/cuda-13.0 /usr/local/cuda)"
+if [ -n "$CUDA_HOME" ]; then
+  NVCC="$CUDA_HOME/bin/nvcc"
+  CUDA_INC="$CUDA_HOME/targets/x86_64-linux/include"
+  CUDA_LIB="$CUDA_HOME/targets/x86_64-linux/lib"
+else
+  # Ubuntu's nvidia-cuda-toolkit package (headers/libs in the default system paths)
+  echo "Warning: no CUDA toolkit dir found, using system CUDA ($(nvcc --version | grep -o 'release [0-9.]*'))."
+  NVCC="nvcc"
+  CUDA_INC="/usr/include"
+  CUDA_LIB="/usr/lib/x86_64-linux-gnu"
+fi
+
+# Intel MKL (RNN CPU kernel). Newer oneAPI uses lib/, older lib/intel64.
+MKL_ROOT="$(first_dir "$MKL_ROOT" /opt/intel/oneapi/mkl/latest "$HOME/intel/oneapi/mkl/latest" "$HOME/local/mkl")"
+MKL_LIB="$(first_dir "$MKL_ROOT/lib/intel64" "$MKL_ROOT/lib")"
+[ -z "$MKL_ROOT" ] && echo "Warning: Intel MKL not found (set MKL_ROOT); the rnn app will fail to build."
+
+# MPI compiler wrapper: $MPI_HOME/bin/mpicc, else $HOME/local/openmpi, else mpicc on PATH.
+MPI_HOME="$(first_dir "$MPI_HOME" "$HOME/local/openmpi")"
+MPICC="${MPI_HOME:+$MPI_HOME/bin/}mpicc"
+if ! command -v "$MPICC" >/dev/null 2>&1; then
+  echo "Error: mpicc not found (set MPI_HOME to your MPI install)."
+  exit 1
+fi
+
+echo "Toolchain: CUDA=${CUDA_HOME:-system} MKL=${MKL_ROOT:-none} MPICC=$(command -v "$MPICC")"
+
+GENERIC_FLAGS="-I$CUDA_INC -Iinclude -L$CUDA_LIB -Wl,-rpath,$CUDA_LIB -lcudart -lstdc++ -lm -Wl,-l:libnvidia-ml.so.1"
 
 # Allow overriding cuDNN location; default to a local install in \$HOME/cudnn.
 CUDNN_ROOT="${CUDNN_ROOT:-$HOME/cudnn}"
@@ -47,56 +81,56 @@ fi
 
 mkdir -p $BUILD_DIR
 
-CC_INC_COMMON="-I/usr/local/cuda-13.0/targets/x86_64-linux/include -Iinclude -I$CCMAES_DIR"
-mpicc -fopenmp -c cudampicommon.c $CC_INC_COMMON -o $BUILD_DIR/cudampicommon.o
-mpicc -fopenmp -c cudampilib.c $CC_INC_COMMON -o $BUILD_DIR/cudampilib.o
-mpicc -fopenmp -c cudampi_state.c $CC_INC_COMMON -o $BUILD_DIR/cudampi_state.o
-mpicc -fopenmp -c powercap_config.c $CC_INC_COMMON -o $BUILD_DIR/powercap_config.o
-mpicc -fopenmp -c powercap.c $CC_INC_COMMON -o $BUILD_DIR/powercap.o
+CC_INC_COMMON="-I$CUDA_INC -Iinclude -I$CCMAES_DIR"
+$MPICC -fopenmp -c cudampicommon.c $CC_INC_COMMON -o $BUILD_DIR/cudampicommon.o
+$MPICC -fopenmp -c cudampilib.c $CC_INC_COMMON -o $BUILD_DIR/cudampilib.o
+$MPICC -fopenmp -c cudampi_state.c $CC_INC_COMMON -o $BUILD_DIR/cudampi_state.o
+$MPICC -fopenmp -c powercap_config.c $CC_INC_COMMON -o $BUILD_DIR/powercap_config.o
+$MPICC -fopenmp -c powercap.c $CC_INC_COMMON -o $BUILD_DIR/powercap.o
 
 # c-cmaes core
-mpicc -fopenmp -c $CCMAES_DIR/cmaes.c -I$CCMAES_DIR -o $BUILD_DIR/cmaes.o
-mpicc -fopenmp -c $CCMAES_DIR/boundary_transformation.c -I$CCMAES_DIR -o $BUILD_DIR/boundary_transformation.o
+$MPICC -fopenmp -c $CCMAES_DIR/cmaes.c -I$CCMAES_DIR -o $BUILD_DIR/cmaes.o
+$MPICC -fopenmp -c $CCMAES_DIR/boundary_transformation.c -I$CCMAES_DIR -o $BUILD_DIR/boundary_transformation.o
 
-#nvcc -c $APPS_DIR/$APP_DIR/appkernel.cu -o $BUILD_DIR/appkernel.o
-nvcc -c $APPS_DIR/$VECMAXDIV_DIR/appkernelvecmaxdiv.cu -o $BUILD_DIR/appkernelvecmaxdiv.o -Iinclude
-nvcc -c $APPS_DIR/$VECADD_DIR/appkernelvecadd.cu -o $BUILD_DIR/appkernelvecadd.o -Iinclude
-nvcc -c $APPS_DIR/$COLLATZ_DIR/appkernelcollatz.cu -o $BUILD_DIR/appkernelcollatz.o -Iinclude
-nvcc -c $APPS_DIR/$PATTERNSEARCH_DIR/appkernelpatternsearch.cu -o $BUILD_DIR/appkernelpatternsearch.o -Iinclude
-nvcc -c $APPS_DIR/$TWINPRIME_DIR/appkerneltwinprime.cu -o $BUILD_DIR/appkerneltwinprime.o -Iinclude
-nvcc -c $APPS_DIR/$RNN_DIR/appkernelrnn.cu -o $BUILD_DIR/appkernelrnn.o -Iinclude -lcublas
-nvcc -c $APPS_DIR/$CNN_DIR/appkernelcnn.cu -o $BUILD_DIR/appkernelcnn.o -Iinclude $CUDNN_INCLUDE_FLAG
-nvcc -c $APPS_DIR/$MONTECARLO_DIR/appkernelmontecarlo.cu -o $BUILD_DIR/appkernelmontecarlo.o -Iinclude
+#$NVCC -c $APPS_DIR/$APP_DIR/appkernel.cu -o $BUILD_DIR/appkernel.o
+$NVCC -c $APPS_DIR/$VECMAXDIV_DIR/appkernelvecmaxdiv.cu -o $BUILD_DIR/appkernelvecmaxdiv.o -Iinclude
+$NVCC -c $APPS_DIR/$VECADD_DIR/appkernelvecadd.cu -o $BUILD_DIR/appkernelvecadd.o -Iinclude
+$NVCC -c $APPS_DIR/$COLLATZ_DIR/appkernelcollatz.cu -o $BUILD_DIR/appkernelcollatz.o -Iinclude
+$NVCC -c $APPS_DIR/$PATTERNSEARCH_DIR/appkernelpatternsearch.cu -o $BUILD_DIR/appkernelpatternsearch.o -Iinclude
+$NVCC -c $APPS_DIR/$TWINPRIME_DIR/appkerneltwinprime.cu -o $BUILD_DIR/appkerneltwinprime.o -Iinclude
+$NVCC -c $APPS_DIR/$RNN_DIR/appkernelrnn.cu -o $BUILD_DIR/appkernelrnn.o -Iinclude -lcublas
+$NVCC -c $APPS_DIR/$CNN_DIR/appkernelcnn.cu -o $BUILD_DIR/appkernelcnn.o -Iinclude $CUDNN_INCLUDE_FLAG
+$NVCC -c $APPS_DIR/$MONTECARLO_DIR/appkernelmontecarlo.cu -o $BUILD_DIR/appkernelmontecarlo.o -Iinclude
 
 
-mpicc -fopenmp -c $APPS_DIR/$COLLATZ_DIR/cpukernelcollatz.c -Iinclude -o $BUILD_DIR/cpukernelcollatz.o
-mpicc -fopenmp -c $APPS_DIR/$VECADD_DIR/cpukernelvecadd.c -Iinclude -o $BUILD_DIR/cpukernelvecadd.o
-mpicc -fopenmp -c $APPS_DIR/$VECMAXDIV_DIR/cpukernelvecmaxdiv.c -Iinclude -o $BUILD_DIR/cpukernelvecmaxdiv.o -lm
-mpicc -fopenmp -c $APPS_DIR/$PATTERNSEARCH_DIR/cpukernelpatternsearch.c -Iinclude -o $BUILD_DIR/cpukernelpatternsearch.o
-mpicc -fopenmp -c $APPS_DIR/$TWINPRIME_DIR/cpukerneltwinprime.c  -Iinclude -lpthread -lm -o $BUILD_DIR/cpukerneltwinprime.o 
-mpicc -fopenmp -c $APPS_DIR/$CNN_DIR/cpukernelcnn.c -Iinclude -o $BUILD_DIR/cpukernelcnn.o
-mpicc -fopenmp -c $APPS_DIR/$RNN_DIR/cpukernelrnn.c -Iinclude -I/opt/intel/oneapi/mkl/latest/include -o $BUILD_DIR/cpukernelrnn.o
-mpicc -fopenmp -O3 -march=native -ffast-math -funroll-loops -c $APPS_DIR/$MONTECARLO_DIR/cpukernelmontecarlo.c -Iinclude -o $BUILD_DIR/cpukernelmontecarlo.o
+$MPICC -fopenmp -c $APPS_DIR/$COLLATZ_DIR/cpukernelcollatz.c -Iinclude -o $BUILD_DIR/cpukernelcollatz.o
+$MPICC -fopenmp -c $APPS_DIR/$VECADD_DIR/cpukernelvecadd.c -Iinclude -o $BUILD_DIR/cpukernelvecadd.o
+$MPICC -fopenmp -c $APPS_DIR/$VECMAXDIV_DIR/cpukernelvecmaxdiv.c -Iinclude -o $BUILD_DIR/cpukernelvecmaxdiv.o -lm
+$MPICC -fopenmp -c $APPS_DIR/$PATTERNSEARCH_DIR/cpukernelpatternsearch.c -Iinclude -o $BUILD_DIR/cpukernelpatternsearch.o
+$MPICC -fopenmp -c $APPS_DIR/$TWINPRIME_DIR/cpukerneltwinprime.c  -Iinclude -lpthread -lm -o $BUILD_DIR/cpukerneltwinprime.o 
+$MPICC -fopenmp -c $APPS_DIR/$CNN_DIR/cpukernelcnn.c -Iinclude -o $BUILD_DIR/cpukernelcnn.o
+$MPICC -fopenmp -c $APPS_DIR/$RNN_DIR/cpukernelrnn.c -Iinclude -I$MKL_ROOT/include -o $BUILD_DIR/cpukernelrnn.o
+$MPICC -fopenmp -O3 -march=native -ffast-math -funroll-loops -c $APPS_DIR/$MONTECARLO_DIR/cpukernelmontecarlo.c -Iinclude -o $BUILD_DIR/cpukernelmontecarlo.o
 
-#mpicc -fopenmp -o $BUILD_DIR/cudampislave cudampislave.c $BUILD_DIR/appkernel.o $BUILD_DIR/cudampicommon.o -I/usr/local/cuda-13.0/targets/x86_64-linux/include -Iinclude -L/usr/local/cuda-13.0/targets/x86_64-linux/lib -lcudart -lstdc++
-mpicc -fopenmp -o $BUILD_DIR/cudampislave-vecmaxdiv cudampislave.c $BUILD_DIR/cpukernelvecmaxdiv.o $BUILD_DIR/appkernelvecmaxdiv.o $BUILD_DIR/cudampicommon.o $CC_INC_COMMON $GENERIC_FLAGS
-mpicc -fopenmp -o $BUILD_DIR/cudampislave-vecadd cudampislave.c $BUILD_DIR/cpukernelvecadd.o $BUILD_DIR/appkernelvecadd.o $BUILD_DIR/cudampicommon.o $CC_INC_COMMON $GENERIC_FLAGS
-mpicc -fopenmp -o $BUILD_DIR/cudampislave-collatz cudampislave.c $BUILD_DIR/cpukernelcollatz.o $BUILD_DIR/appkernelcollatz.o $BUILD_DIR/cudampicommon.o $CC_INC_COMMON $GENERIC_FLAGS
-mpicc -fopenmp -o $BUILD_DIR/cudampislave-patternsearch cudampislave.c $BUILD_DIR/cpukernelpatternsearch.o $BUILD_DIR/appkernelpatternsearch.o $BUILD_DIR/cudampicommon.o $CC_INC_COMMON $GENERIC_FLAGS
-mpicc -fopenmp -o $BUILD_DIR/cudampislave-twinprime cudampislave.c $BUILD_DIR/cpukerneltwinprime.o $BUILD_DIR/appkerneltwinprime.o $BUILD_DIR/cudampicommon.o $CC_INC_COMMON $GENERIC_FLAGS
-mpicc -fopenmp -o $BUILD_DIR/cudampislave-rnn cudampislave.c $BUILD_DIR/cpukernelrnn.o $BUILD_DIR/appkernelrnn.o $BUILD_DIR/cudampicommon.o $CC_INC_COMMON $GENERIC_FLAGS -lcublas -I/opt/intel/oneapi/mkl/latest/include -L/opt/intel/oneapi/mkl/latest/lib/intel64 -Wl,-Bstatic -lmkl_intel_lp64 -lmkl_gnu_thread -lmkl_core -Wl,-Bdynamic -lpthread -lm
-mpicc -fopenmp -o $BUILD_DIR/cudampislave-cnn cudampislave.c $BUILD_DIR/cpukernelcnn.o $BUILD_DIR/appkernelcnn.o $BUILD_DIR/cudampicommon.o $CC_INC_COMMON $GENERIC_FLAGS $CUDNN_LIB_FLAG -lcudnn
-mpicc -fopenmp -o $BUILD_DIR/cudampislave-montecarlo cudampislave.c $BUILD_DIR/cpukernelmontecarlo.o $BUILD_DIR/appkernelmontecarlo.o $BUILD_DIR/cudampicommon.o $CC_INC_COMMON $GENERIC_FLAGS
+#$MPICC -fopenmp -o $BUILD_DIR/cudampislave cudampislave.c $BUILD_DIR/appkernel.o $BUILD_DIR/cudampicommon.o -I$CUDA_INC -Iinclude -L$CUDA_LIB -lcudart -lstdc++
+$MPICC -fopenmp -o $BUILD_DIR/cudampislave-vecmaxdiv cudampislave.c $BUILD_DIR/cpukernelvecmaxdiv.o $BUILD_DIR/appkernelvecmaxdiv.o $BUILD_DIR/cudampicommon.o $CC_INC_COMMON $GENERIC_FLAGS
+$MPICC -fopenmp -o $BUILD_DIR/cudampislave-vecadd cudampislave.c $BUILD_DIR/cpukernelvecadd.o $BUILD_DIR/appkernelvecadd.o $BUILD_DIR/cudampicommon.o $CC_INC_COMMON $GENERIC_FLAGS
+$MPICC -fopenmp -o $BUILD_DIR/cudampislave-collatz cudampislave.c $BUILD_DIR/cpukernelcollatz.o $BUILD_DIR/appkernelcollatz.o $BUILD_DIR/cudampicommon.o $CC_INC_COMMON $GENERIC_FLAGS
+$MPICC -fopenmp -o $BUILD_DIR/cudampislave-patternsearch cudampislave.c $BUILD_DIR/cpukernelpatternsearch.o $BUILD_DIR/appkernelpatternsearch.o $BUILD_DIR/cudampicommon.o $CC_INC_COMMON $GENERIC_FLAGS
+$MPICC -fopenmp -o $BUILD_DIR/cudampislave-twinprime cudampislave.c $BUILD_DIR/cpukerneltwinprime.o $BUILD_DIR/appkerneltwinprime.o $BUILD_DIR/cudampicommon.o $CC_INC_COMMON $GENERIC_FLAGS
+$MPICC -fopenmp -o $BUILD_DIR/cudampislave-rnn cudampislave.c $BUILD_DIR/cpukernelrnn.o $BUILD_DIR/appkernelrnn.o $BUILD_DIR/cudampicommon.o $CC_INC_COMMON $GENERIC_FLAGS -lcublas -I$MKL_ROOT/include -L$MKL_LIB -Wl,-Bstatic -lmkl_intel_lp64 -lmkl_gnu_thread -lmkl_core -Wl,-Bdynamic -lpthread -lm
+$MPICC -fopenmp -o $BUILD_DIR/cudampislave-cnn cudampislave.c $BUILD_DIR/cpukernelcnn.o $BUILD_DIR/appkernelcnn.o $BUILD_DIR/cudampicommon.o $CC_INC_COMMON $GENERIC_FLAGS $CUDNN_LIB_FLAG -lcudnn
+$MPICC -fopenmp -o $BUILD_DIR/cudampislave-montecarlo cudampislave.c $BUILD_DIR/cpukernelmontecarlo.o $BUILD_DIR/appkernelmontecarlo.o $BUILD_DIR/cudampicommon.o $CC_INC_COMMON $GENERIC_FLAGS
 
-#mpicc -fopenmp -o $BUILD_DIR/app $APPS_DIR/$APP_DIR/app.c $BUILD_DIR/appkernel.o $BUILD_DIR/cudampilib.o $BUILD_DIR/cudampicommon.o -I/usr/local/cuda-13.0/targets/x86_64-linux/include -Iinclude -L/usr/local/cuda-13.0/targets/x86_64-linux/lib -lcudart -lstdc++
+#$MPICC -fopenmp -o $BUILD_DIR/app $APPS_DIR/$APP_DIR/app.c $BUILD_DIR/appkernel.o $BUILD_DIR/cudampilib.o $BUILD_DIR/cudampicommon.o -I$CUDA_INC -Iinclude -L$CUDA_LIB -lcudart -lstdc++
 LINK_CMAES="$BUILD_DIR/cmaes.o $BUILD_DIR/boundary_transformation.o"
-mpicc -fopenmp -o $BUILD_DIR/app-streams-vecmaxdiv $APPS_DIR/$VECMAXDIV_DIR/app-streams-vecmaxdiv.c $BUILD_DIR/cpukernelvecmaxdiv.o $BUILD_DIR/appkernelvecmaxdiv.o $BUILD_DIR/cudampilib.o $BUILD_DIR/cudampicommon.o $BUILD_DIR/powercap_config.o $BUILD_DIR/powercap.o $BUILD_DIR/cudampi_state.o $LINK_CMAES $CC_INC_COMMON $GENERIC_FLAGS
-mpicc -fopenmp -o $BUILD_DIR/app-streams-vecadd $APPS_DIR/$VECADD_DIR/app-streams-vecadd.c $BUILD_DIR/cpukernelvecadd.o $BUILD_DIR/appkernelvecadd.o $BUILD_DIR/cudampilib.o $BUILD_DIR/cudampicommon.o $BUILD_DIR/powercap_config.o $BUILD_DIR/powercap.o $BUILD_DIR/cudampi_state.o $LINK_CMAES $CC_INC_COMMON $GENERIC_FLAGS
-mpicc -fopenmp -o $BUILD_DIR/app-streams-collatz $APPS_DIR/$COLLATZ_DIR/app-streams-collatz.c $BUILD_DIR/cpukernelcollatz.o $BUILD_DIR/appkernelcollatz.o $BUILD_DIR/cudampilib.o $BUILD_DIR/cudampicommon.o $BUILD_DIR/powercap_config.o $BUILD_DIR/powercap.o $BUILD_DIR/cudampi_state.o $LINK_CMAES $CC_INC_COMMON $GENERIC_FLAGS
-mpicc -fopenmp -o $BUILD_DIR/app-streams-patternsearch $APPS_DIR/$PATTERNSEARCH_DIR/app-streams-patternsearch.c $BUILD_DIR/cpukernelpatternsearch.o $BUILD_DIR/appkernelpatternsearch.o $BUILD_DIR/cudampilib.o $BUILD_DIR/cudampicommon.o $BUILD_DIR/powercap_config.o $BUILD_DIR/powercap.o $BUILD_DIR/cudampi_state.o $LINK_CMAES $CC_INC_COMMON $GENERIC_FLAGS
-mpicc -fopenmp -o $BUILD_DIR/app-streams-twinprime $APPS_DIR/$TWINPRIME_DIR/app-streams-twinprime.c $BUILD_DIR/cpukerneltwinprime.o $BUILD_DIR/appkerneltwinprime.o $BUILD_DIR/cudampilib.o $BUILD_DIR/cudampicommon.o $BUILD_DIR/powercap_config.o $BUILD_DIR/powercap.o $BUILD_DIR/cudampi_state.o $LINK_CMAES $CC_INC_COMMON $GENERIC_FLAGS
-mpicc -fopenmp -o $BUILD_DIR/app-streams-rnn $APPS_DIR/$RNN_DIR/app-streams-rnn.c $BUILD_DIR/cpukernelrnn.o $BUILD_DIR/appkernelrnn.o $BUILD_DIR/cudampilib.o $BUILD_DIR/cudampicommon.o $BUILD_DIR/powercap_config.o $BUILD_DIR/powercap.o $BUILD_DIR/cudampi_state.o $LINK_CMAES $CC_INC_COMMON $GENERIC_FLAGS -lcublas -I/opt/intel/oneapi/mkl/latest/include -L/opt/intel/oneapi/mkl/latest/lib/intel64 -Wl,-Bstatic -lmkl_intel_lp64 -lmkl_gnu_thread -lmkl_core -Wl,-Bdynamic -lpthread -lm
-mpicc -fopenmp -o $BUILD_DIR/app-streams-cnn $APPS_DIR/$CNN_DIR/app-streams-cnn.c $BUILD_DIR/cpukernelcnn.o $BUILD_DIR/appkernelcnn.o $BUILD_DIR/cudampilib.o $BUILD_DIR/cudampicommon.o $BUILD_DIR/powercap_config.o $BUILD_DIR/powercap.o $BUILD_DIR/cudampi_state.o $LINK_CMAES $CC_INC_COMMON $GENERIC_FLAGS $CUDNN_LIB_FLAG -lcudnn
-mpicc -fopenmp -o $BUILD_DIR/app-streams-montecarlo $APPS_DIR/$MONTECARLO_DIR/app-streams-montecarlo.c $BUILD_DIR/cpukernelmontecarlo.o $BUILD_DIR/appkernelmontecarlo.o $BUILD_DIR/cudampilib.o $BUILD_DIR/cudampicommon.o $BUILD_DIR/powercap_config.o $BUILD_DIR/powercap.o $BUILD_DIR/cudampi_state.o $LINK_CMAES $CC_INC_COMMON $GENERIC_FLAGS
+$MPICC -fopenmp -o $BUILD_DIR/app-streams-vecmaxdiv $APPS_DIR/$VECMAXDIV_DIR/app-streams-vecmaxdiv.c $BUILD_DIR/cpukernelvecmaxdiv.o $BUILD_DIR/appkernelvecmaxdiv.o $BUILD_DIR/cudampilib.o $BUILD_DIR/cudampicommon.o $BUILD_DIR/powercap_config.o $BUILD_DIR/powercap.o $BUILD_DIR/cudampi_state.o $LINK_CMAES $CC_INC_COMMON $GENERIC_FLAGS
+$MPICC -fopenmp -o $BUILD_DIR/app-streams-vecadd $APPS_DIR/$VECADD_DIR/app-streams-vecadd.c $BUILD_DIR/cpukernelvecadd.o $BUILD_DIR/appkernelvecadd.o $BUILD_DIR/cudampilib.o $BUILD_DIR/cudampicommon.o $BUILD_DIR/powercap_config.o $BUILD_DIR/powercap.o $BUILD_DIR/cudampi_state.o $LINK_CMAES $CC_INC_COMMON $GENERIC_FLAGS
+$MPICC -fopenmp -o $BUILD_DIR/app-streams-collatz $APPS_DIR/$COLLATZ_DIR/app-streams-collatz.c $BUILD_DIR/cpukernelcollatz.o $BUILD_DIR/appkernelcollatz.o $BUILD_DIR/cudampilib.o $BUILD_DIR/cudampicommon.o $BUILD_DIR/powercap_config.o $BUILD_DIR/powercap.o $BUILD_DIR/cudampi_state.o $LINK_CMAES $CC_INC_COMMON $GENERIC_FLAGS
+$MPICC -fopenmp -o $BUILD_DIR/app-streams-patternsearch $APPS_DIR/$PATTERNSEARCH_DIR/app-streams-patternsearch.c $BUILD_DIR/cpukernelpatternsearch.o $BUILD_DIR/appkernelpatternsearch.o $BUILD_DIR/cudampilib.o $BUILD_DIR/cudampicommon.o $BUILD_DIR/powercap_config.o $BUILD_DIR/powercap.o $BUILD_DIR/cudampi_state.o $LINK_CMAES $CC_INC_COMMON $GENERIC_FLAGS
+$MPICC -fopenmp -o $BUILD_DIR/app-streams-twinprime $APPS_DIR/$TWINPRIME_DIR/app-streams-twinprime.c $BUILD_DIR/cpukerneltwinprime.o $BUILD_DIR/appkerneltwinprime.o $BUILD_DIR/cudampilib.o $BUILD_DIR/cudampicommon.o $BUILD_DIR/powercap_config.o $BUILD_DIR/powercap.o $BUILD_DIR/cudampi_state.o $LINK_CMAES $CC_INC_COMMON $GENERIC_FLAGS
+$MPICC -fopenmp -o $BUILD_DIR/app-streams-rnn $APPS_DIR/$RNN_DIR/app-streams-rnn.c $BUILD_DIR/cpukernelrnn.o $BUILD_DIR/appkernelrnn.o $BUILD_DIR/cudampilib.o $BUILD_DIR/cudampicommon.o $BUILD_DIR/powercap_config.o $BUILD_DIR/powercap.o $BUILD_DIR/cudampi_state.o $LINK_CMAES $CC_INC_COMMON $GENERIC_FLAGS -lcublas -I$MKL_ROOT/include -L$MKL_LIB -Wl,-Bstatic -lmkl_intel_lp64 -lmkl_gnu_thread -lmkl_core -Wl,-Bdynamic -lpthread -lm
+$MPICC -fopenmp -o $BUILD_DIR/app-streams-cnn $APPS_DIR/$CNN_DIR/app-streams-cnn.c $BUILD_DIR/cpukernelcnn.o $BUILD_DIR/appkernelcnn.o $BUILD_DIR/cudampilib.o $BUILD_DIR/cudampicommon.o $BUILD_DIR/powercap_config.o $BUILD_DIR/powercap.o $BUILD_DIR/cudampi_state.o $LINK_CMAES $CC_INC_COMMON $GENERIC_FLAGS $CUDNN_LIB_FLAG -lcudnn
+$MPICC -fopenmp -o $BUILD_DIR/app-streams-montecarlo $APPS_DIR/$MONTECARLO_DIR/app-streams-montecarlo.c $BUILD_DIR/cpukernelmontecarlo.o $BUILD_DIR/appkernelmontecarlo.o $BUILD_DIR/cudampilib.o $BUILD_DIR/cudampicommon.o $BUILD_DIR/powercap_config.o $BUILD_DIR/powercap.o $BUILD_DIR/cudampi_state.o $LINK_CMAES $CC_INC_COMMON $GENERIC_FLAGS
 
 echo "Build complete. Executables and object files are in '$BUILD_DIR'."

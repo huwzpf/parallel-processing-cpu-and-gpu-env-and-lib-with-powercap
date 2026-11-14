@@ -1,8 +1,17 @@
 #!/bin/bash
 
 BUILD_DIR="build"
-HOSTFILE="./hostfile"
-TEMP_HOSTFILE="./temp_hostfile"
+HOSTFILE="${HOSTFILE:-./hostfile}"
+TEMP_HOSTFILE="${TEMP_HOSTFILE:-./temp_hostfile}"
+
+# mpirun from $MPI_HOME (default: ~/local/openmpi), else the one on PATH.
+# Using the full path also makes Open MPI start the same install on the remote nodes.
+MPI_HOME="${MPI_HOME:-$HOME/local/openmpi}"
+if [ -x "$MPI_HOME/bin/mpirun" ]; then
+    MPIRUN="$MPI_HOME/bin/mpirun"
+else
+    MPIRUN="mpirun"
+fi
 
 is_number() {
     [[ "$1" =~ ^[0-9]+$ ]]
@@ -64,8 +73,8 @@ elif [ "$MODE" == "C" ]; then
     echo "Running remotely with application '$APP_NAME'..."
 
     # Base MPI command for the master process
-    mpi_command="mpirun --mca orte_keep_fqdn_hostnames t \
---mca btl_tcp_if_exclude docker0,docker_gwbridge,lo,vboxnet0 \
+    mpi_command="$MPIRUN --mca orte_keep_fqdn_hostnames t \
+--mca btl_tcp_if_include 172.20.82.0/23 --mca oob_tcp_if_include 172.20.82.0/23 \
 --bind-to none \
 --machinefile \"$TEMP_HOSTFILE\" \
 -np 1 ./$BUILD_DIR/app-streams-$APP_NAME ${@}"
@@ -94,8 +103,8 @@ elif [ "$MODE" == "B" ]; then
     head -n "$MACHINES_COUNT" "$HOSTFILE" > "$TEMP_HOSTFILE"
 
     # Base MPI command for the master process
-    mpi_command="mpirun --mca orte_keep_fqdn_hostnames t \
---mca btl_tcp_if_exclude docker0,docker_gwbridge,lo,vboxnet0 \
+    mpi_command="$MPIRUN --mca orte_keep_fqdn_hostnames t \
+--mca btl_tcp_if_include 172.20.82.0/23 --mca oob_tcp_if_include 172.20.82.0/23 \
 --bind-to none \
 --machinefile \"$TEMP_HOSTFILE\" \
 -np 1 ./$BUILD_DIR/app-streams-$APP_NAME ${@:4}"
