@@ -45,6 +45,10 @@ extern double __cudampi__timePerDataPoint[__CUDAMPI_MAX_THREAD_COUNT];
 // Guarded by __cudampi__devicelocks[i].
 extern double __cudampi__windowEnergy[__CUDAMPI_MAX_THREAD_COUNT];
 extern double __cudampi__windowEnergyTime[__CUDAMPI_MAX_THREAD_COUNT];
+// Data points processed by each device and the time [s] they took, accumulated the same
+// way (every device synchronization since the EDP manager last consumed them).
+extern double __cudampi__windowDataPoints[__CUDAMPI_MAX_THREAD_COUNT];
+extern double __cudampi__windowDataTime[__CUDAMPI_MAX_THREAD_COUNT];
 extern devicePowerConfig_t __cudampi__devicePowerConfig[__CUDAMPI_MAX_THREAD_COUNT];
 extern omp_lock_t __cudampi__devicelocks[__CUDAMPI_MAX_THREAD_COUNT];
 extern omp_lock_t deviceselectionlock;

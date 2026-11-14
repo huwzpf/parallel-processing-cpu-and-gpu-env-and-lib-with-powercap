@@ -1844,11 +1844,17 @@ void __cudampi__powercappingManagerStep(void) {
     static unsigned long long edp_window_count = 0ULL;   // total sync windows seen
     static unsigned long long acc_count = 0ULL;          // windows accumulated since last optimizer step
     static double acc_edp = 0.0;                         // sum of per-window EDP values
+    // Windows still to discard before EDP is trusted again. A window that follows a cap
+    // change mixes batches run under the old and the new caps; the first window of the
+    // run contains start-up. Starts at 1 so that first window is dropped.
+    static unsigned long long settle_windows_left = 1ULL;
     double combinedEnergy = 0.0;
     // Per-device energy/time accumulators as read in this step; subtracted (not zeroed)
     // at the end so energy reported by a device while the optimizer runs is kept.
     double consumedEnergy[__CUDAMPI_MAX_THREAD_COUNT];
     double consumedEnergyTime[__CUDAMPI_MAX_THREAD_COUNT];
+    double consumedDataPoints[__CUDAMPI_MAX_THREAD_COUNT];
+    double consumedDataTime[__CUDAMPI_MAX_THREAD_COUNT];
 
     // TODO: Reintroduce stricter EDP sample validation/rejection once this path has settled.
     // log_message(LOG_INFO, "EDP Gradient Optimization: Checking if all devices have completed their last batch.");
@@ -1874,7 +1880,16 @@ void __cudampi__powercappingManagerStep(void) {
         combinedPower += __cudampi__devicePowerConfig[i].currentPower;
       }
 
-      if (__cudampi__timePerDataPoint[i] > 0.0 && isfinite(__cudampi__timePerDataPoint[i])) {
+      // Device throughput = data points of all batches finished since the last window,
+      // divided by the time those batches took (same reasoning as for power above).
+      consumedDataPoints[i] = __cudampi__windowDataPoints[i];
+      consumedDataTime[i] = __cudampi__windowDataTime[i];
+      if (consumedDataPoints[i] > 0.0 && consumedDataTime[i] > 0.0) {
+        double timePerDataPoint = consumedDataTime[i] / consumedDataPoints[i];
+        sumTimePerDataPoint += timePerDataPoint;
+        sumRecipTimePerDataPoint += 1.0 / timePerDataPoint;
+      } else if (__cudampi__timePerDataPoint[i] > 0.0 && isfinite(__cudampi__timePerDataPoint[i])) {
+        // Nothing accumulated in this window: fall back to the last batch's rate
         sumTimePerDataPoint += __cudampi__timePerDataPoint[i];
         sumRecipTimePerDataPoint += 1.0 / __cudampi__timePerDataPoint[i];
       }
@@ -1925,10 +1940,19 @@ void __cudampi__powercappingManagerStep(void) {
     } else {
       __cudampi__edp = 0.0;
     }
-    edp_window_count++;
+    // A settling window is measured and consumed like any other, but its EDP is neither
+    // logged as an [OPTIMIZER STEP] sample nor fed to the optimizer.
+    int settleWindow = (settle_windows_left > 0ULL);
+    if (settleWindow) {
+      settle_windows_left--;
+      log_message(LOG_WARN, "[OPTIMIZER SETTLE] discarded window period_s=%.6f edp=%.8f avg_power=%.3fW",
+                  period_sec, __cudampi__edp, combinedPower);
+    } else {
+      edp_window_count++;
+    }
 
-    // Structured per-window EDP sample for SNR analysis (always emitted)
-    {
+    // Structured per-window EDP sample for SNR analysis
+    if (!settleWindow) {
       char cap_str[1024] = "";
       int cap_pos = 0;
       for (int i = 0; i < __cudampi_totaldevicecount && cap_pos < (int)sizeof(cap_str) - 16; i++) {
@@ -1944,11 +1968,13 @@ void __cudampi__powercappingManagerStep(void) {
     }
 
     // Accumulate EDP for N-window averaging before optimizer step
-    acc_edp += __cudampi__edp;
-    acc_count++;
+    if (!settleWindow) {
+      acc_edp += __cudampi__edp;
+      acc_count++;
+    }
 
     // Only trigger optimizer every optimizer_step_interval windows
-    if (acc_count >= __cudampi__optimizer_step_interval) {
+    if (!settleWindow && acc_count >= __cudampi__optimizer_step_interval) {
       // Use mean EDP across accumulated windows as the optimizer input
       __cudampi__edp = acc_edp / (double)acc_count;
       acc_edp = 0.0; acc_count = 0ULL;
@@ -1994,7 +2020,18 @@ void __cudampi__powercappingManagerStep(void) {
       } else {
         // Proceed with one optimisation update
         __cudampi__grad_update_performed = 0;
+        float capsBefore[__CUDAMPI_MAX_THREAD_COUNT];
+        for (int i = 0; i < __cudampi_totaldevicecount; i++) {
+          capsBefore[i] = __cudampi__devicePowerConfig[i].currentPowerCap;
+        }
         __cudampi__selectpowercap_gradient();
+        // If any cap moved, the next window still contains work done under the old caps
+        for (int i = 0; i < __cudampi_totaldevicecount; i++) {
+          if (__cudampi__devicePowerConfig[i].currentPowerCap != capsBefore[i]) {
+            settle_windows_left = 1ULL;
+            break;
+          }
+        }
         if (__cudampi__grad_update_performed) {
           edp_opt_iterations++;
           __cudampi__grad_update_performed = 0;
@@ -2008,6 +2045,8 @@ void __cudampi__powercappingManagerStep(void) {
       __cudampi__mgr_data_points_sent[i] = __cudampi__last_data_points_sent[i];
       __cudampi__windowEnergy[i] -= consumedEnergy[i];
       __cudampi__windowEnergyTime[i] -= consumedEnergyTime[i];
+      __cudampi__windowDataPoints[i] -= consumedDataPoints[i];
+      __cudampi__windowDataTime[i] -= consumedDataTime[i];
       omp_unset_lock(&(__cudampi__devicelocks[i]));
     }
   } 

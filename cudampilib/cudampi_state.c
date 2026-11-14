@@ -44,6 +44,8 @@ int __cudampi__timemeasured[__CUDAMPI_MAX_THREAD_COUNT] = {0};
 double __cudampi__timePerDataPoint[__CUDAMPI_MAX_THREAD_COUNT] = {0.0};
 double __cudampi__windowEnergy[__CUDAMPI_MAX_THREAD_COUNT] = {0.0};
 double __cudampi__windowEnergyTime[__CUDAMPI_MAX_THREAD_COUNT] = {0.0};
+double __cudampi__windowDataPoints[__CUDAMPI_MAX_THREAD_COUNT] = {0.0};
+double __cudampi__windowDataTime[__CUDAMPI_MAX_THREAD_COUNT] = {0.0};
 
 devicePowerConfig_t __cudampi__devicePowerConfig[__CUDAMPI_MAX_THREAD_COUNT];
 omp_lock_t __cudampi__devicelocks[__CUDAMPI_MAX_THREAD_COUNT];

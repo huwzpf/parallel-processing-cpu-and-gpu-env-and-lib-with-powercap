@@ -1075,6 +1075,13 @@ cudaError_t __cudampi__deviceSynchronize(void) {
       __cudampi__timePerDataPoint[__cudampi__currentDevice] = time_in_seconds / (double)data_points_sent;
     }
 
+    // Accumulate work done and the time it took for the EDP manager, so a sync window's
+    // throughput reflects every batch run in it, not just the most recent one.
+    if (data_points_sent > 0ULL && time_in_seconds > 0.0) {
+      __cudampi__windowDataPoints[__cudampi__currentDevice] += (double)data_points_sent;
+      __cudampi__windowDataTime[__cudampi__currentDevice] += time_in_seconds;
+    }
+
     // Divide time by scaling factor (which is smaller than 1) which means that
     // if batch size for that device was scaled down, time it would take to process full batch of data is calculated
     __cudampi__time_us[__cudampi__currentDevice] /= scaling_factor;

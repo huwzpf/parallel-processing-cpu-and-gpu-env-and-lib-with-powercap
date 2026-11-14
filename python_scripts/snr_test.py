@@ -26,7 +26,11 @@ N is the optimizer_step_interval (the number of windows averaged per estimate).
 The run length is sized for the highest N so enough windows exist to derive every
 smaller N:
 
-    iters = round(max(N) * number_of_nodes * batch_size / 2)
+    windows = steps_at_max_n * max(N)
+
+--steps-at-max-n (default 30) is the number of optimizer steps (EDP estimates) wanted
+at the highest N. run_length.iters_for_windows() turns that window count into the
+app's --iters from the data size and sync cadence in the app sources.
 
 Usage:
     python snr_test.py [--app {cnn,rnn}] [--out-dir OUTPUT_DIR] [--nodes N [N ...]]
@@ -51,25 +55,24 @@ import matplotlib.pyplot as plt
 
 from experiments import single_app_run
 from models import RunParameters
+from run_length import iters_for_windows
 
 
 # ---------------------------------------------------------------------------
 # Experiment runner
 # ---------------------------------------------------------------------------
 
-# Each app's default batch size. iters is normalized by this so the run length
-# stays in a reasonable range regardless of which app / batch_size is swept.
-# CNN and RNN default to 20; the remaining apps default to 240000.
-DEFAULT_BATCH_SIZES = {"cnn": 20, "rnn": 20}
-DEFAULT_BATCH_SIZE_FALLBACK = 240000
+# Optimizer steps (EDP estimates) wanted at the highest N of a run.
+DEFAULT_STEPS_AT_MAX_N = 30
 
 
-def compute_iters(n: int, number_od_nodes: int, batch_size: int, app_name: str) -> int:
-    """Dataset iteration count for a run: round(N * nodes * batch_size / default_bs),
-    where default_bs is the app's default batch size (treated as a normalizer to keep
-    iters in a reasonable range across different batch sizes)."""
-    default_bs = DEFAULT_BATCH_SIZES.get(app_name, DEFAULT_BATCH_SIZE_FALLBACK)
-    return int(round(n * number_od_nodes * batch_size / default_bs))
+def compute_iters(max_n: int, number_od_nodes: int, batch_size: int, app_name: str,
+                  steps_at_max_n: int = DEFAULT_STEPS_AT_MAX_N, number_of_streams: int = 2,
+                  cpu_enabled: bool = True) -> int:
+    """Dataset iterations for a run that should yield steps_at_max_n optimizer steps at
+    max_n, i.e. steps_at_max_n * max_n sync windows (see run_length.iters_for_windows)."""
+    return iters_for_windows(app_name, batch_size, number_od_nodes, steps_at_max_n * max_n,
+                             number_of_streams=number_of_streams, cpu_enabled=cpu_enabled)
 
 
 def parse_window_edps(log_file: str) -> np.ndarray | None:
@@ -119,7 +122,8 @@ def derive_edp_estimates(window_edps: np.ndarray, N: int) -> np.ndarray:
 
 def _run_edp_monitor(app_name: str, batch_size: int, cap: float, n_values: list[int],
                      n_runs: int, out_dir: str, number_od_nodes: int = 8,
-                     cpu_enabled: bool = True) -> pd.DataFrame | None:
+                     cpu_enabled: bool = True,
+                     steps_at_max_n: int = DEFAULT_STEPS_AT_MAX_N) -> pd.DataFrame | None:
     """
     Run EQUAL_SPLIT_EDP_MONITOR at a fixed cap, once at the highest N, and derive
     the EDP estimates for *every* N in n_values from the per-window
@@ -130,11 +134,13 @@ def _run_edp_monitor(app_name: str, batch_size: int, cap: float, n_values: list[
     nothing was captured.
     """
     max_N = max(n_values)
-    iters = compute_iters(max_N, number_od_nodes, batch_size, app_name)
+    number_of_streams = 2
+    iters = compute_iters(max_N, number_od_nodes, batch_size, app_name, steps_at_max_n,
+                          number_of_streams=number_of_streams, cpu_enabled=cpu_enabled)
     params = RunParameters(
         app_name=app_name,
         cpu_enabled=cpu_enabled,
-        number_of_streams=2,
+        number_of_streams=number_of_streams,
         number_od_nodes=number_od_nodes,
         batch_size=batch_size,
         strategy="EQUAL_SPLIT_EDP_MONITOR",
@@ -184,6 +190,7 @@ def run_snr_experiments(
     out_dir: str = "snr_results",
     number_od_nodes: int = 8,
     cpu_enabled: bool = True,
+    steps_at_max_n: int = DEFAULT_STEPS_AT_MAX_N,
 ) -> dict:
     """
     Run the EDP-monitor SNR diagnostic over the grid (batch_size, base_cap).
@@ -203,7 +210,8 @@ def run_snr_experiments(
     for batch_size in batch_sizes:
         for cap in caps:
             df = _run_edp_monitor(app_name, batch_size, cap, n_values, n_runs, out_dir,
-                                  number_od_nodes, cpu_enabled=cpu_enabled)
+                                  number_od_nodes, cpu_enabled=cpu_enabled,
+                                  steps_at_max_n=steps_at_max_n)
             if df is not None:
                 frames.append(df)
 
@@ -346,9 +354,8 @@ def build_estimates_from_logs(
     estimates for every N in n_values are derived from them (derive_edp_estimates),
     exactly as a live run would.
 
-    number_od_nodes (for the iters column) is taken from the argument if given,
-    else inferred from a '<n>_nodes' suffix on out_dir; app_name likewise falls
-    back to the name embedded in each log filename.
+    app_name falls back to the name embedded in each log filename. The iters column
+    is left empty (NaN): the iteration count is not recorded in the logs.
 
     Returns the concatenated per-step estimates (empty DataFrame if no parseable
     logs were found).
@@ -384,8 +391,8 @@ def build_estimates_from_logs(
             print(f"[SNR]   no [OPTIMIZER STEP] windows parsed from {log_path.name}")
             continue
 
-        iters = (compute_iters(max_N, number_od_nodes, batch_size, app)
-                 if number_od_nodes is not None else float("nan"))
+        # The iters a run was launched with are not recorded in its log.
+        iters = float("nan")
 
         # Only derive N values that the run actually had enough windows for
         # (and that don't exceed the run's max_N).
@@ -634,13 +641,18 @@ def plot_snr_results(results: dict, out_dir: str = "snr_results") -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="SNR diagnostic for EDP optimization (EQUAL_SPLIT_EDP_MONITOR)")
     parser.add_argument("--app", choices=["cnn", "rnn", "montecarlo"], default="rnn")
+    parser.add_argument("--results-dir", default=".",
+                        help="Directory that experiment output goes into "
+                             "(default: the current directory)")
     parser.add_argument("--out-dir", default="snr_results",
-                        help="Base output dir; each node count gets its own '<out-dir>_<n>_nodes'")
+                        help="Experiments: name stem; each node count gets its own "
+                             "'<results-dir>/<app>_<out-dir>_<n>_nodes'. "
+                             "--plots-only / --from-logs: path of that per-node directory")
     parser.add_argument("--nodes", nargs="+", type=int, default=[4],
                         help="Node counts to sweep; experiments+plots are repeated for each")
-    parser.add_argument("--n-runs", type=int, default=3, help="Repetitions per (batch_size, N, cap)")
+    parser.add_argument("--n-runs", type=int, default=1, help="Repetitions per (batch_size, N, cap)")
     parser.add_argument(
-        "--batch-sizes", nargs="+", type=int, default=[20, 50, 100],
+        "--batch-sizes", nargs="+", type=int, default=[50],
         help="Batch sizes to sweep"
     )
     parser.add_argument(
@@ -651,6 +663,11 @@ if __name__ == "__main__":
         "--n-values", nargs="+", type=int, default=[1, 5, 10, 20],
         help="N (optimizer_step_interval) values; one run at max(N) is collected and "
              "the smaller N are derived from its per-window [OPTIMIZER STEP] logs"
+    )
+    parser.add_argument(
+        "--steps-at-max-n", type=int, default=DEFAULT_STEPS_AT_MAX_N,
+        help="Optimizer steps (EDP estimates) wanted at the highest N; each run is sized "
+             "for steps * max(N) sync windows"
     )
     parser.add_argument(
         "--plots-only", action="store_true",
@@ -684,7 +701,9 @@ if __name__ == "__main__":
         # Run the identical experiment + plotting pipeline once per node count,
         # writing each into its own directory (e.g. snr_results_4_nodes).
         for nodes in args.nodes:
-            node_out_dir = f"{args.app}_{args.out_dir}_{nodes}_nodes"
+            # Absolute, because single_app_run() changes the working directory.
+            node_out_dir = os.path.join(os.path.abspath(args.results_dir),
+                                        f"{args.app}_{args.out_dir}_{nodes}_nodes")
             print(f"\n[SNR] ===== node count = {nodes} -> {node_out_dir} =====")
 
             results = run_snr_experiments(
@@ -696,5 +715,6 @@ if __name__ == "__main__":
                 out_dir=node_out_dir,
                 number_od_nodes=nodes,
                 cpu_enabled=not args.gpu_only,
+                steps_at_max_n=args.steps_at_max_n,
             )
             plot_snr_results(results, out_dir=node_out_dir)
