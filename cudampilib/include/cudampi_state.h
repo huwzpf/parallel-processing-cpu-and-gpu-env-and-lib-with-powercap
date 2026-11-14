@@ -40,6 +40,11 @@ extern double __cudampi__time_us[__CUDAMPI_MAX_THREAD_COUNT];
 extern int __cudampi__timemeasured[__CUDAMPI_MAX_THREAD_COUNT];
 // Latest measured time per data point (seconds) per device
 extern double __cudampi__timePerDataPoint[__CUDAMPI_MAX_THREAD_COUNT];
+// Energy [J] measured by each device and the time [s] that energy covers, accumulated
+// over every device synchronization since the EDP manager last consumed them.
+// Guarded by __cudampi__devicelocks[i].
+extern double __cudampi__windowEnergy[__CUDAMPI_MAX_THREAD_COUNT];
+extern double __cudampi__windowEnergyTime[__CUDAMPI_MAX_THREAD_COUNT];
 extern devicePowerConfig_t __cudampi__devicePowerConfig[__CUDAMPI_MAX_THREAD_COUNT];
 extern omp_lock_t __cudampi__devicelocks[__CUDAMPI_MAX_THREAD_COUNT];
 extern omp_lock_t deviceselectionlock;

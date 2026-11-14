@@ -1099,6 +1099,13 @@ cudaError_t __cudampi__deviceSynchronize(void) {
       #pragma omp atomic
       __cudampi__totalEnergyUsed += intervalEnergy;
     }
+
+    // Accumulate measured energy and the time it covers for the EDP manager, so a sync
+    // window is charged for every batch run in it, not just the most recent one.
+    if (intervalEnergy >= 0.0f) {
+      __cudampi__windowEnergy[__cudampi__currentDevice] += (double)intervalEnergy;
+      __cudampi__windowEnergyTime[__cudampi__currentDevice] += time_in_seconds;
+    }
     
     // Check if CPU batch size scaling was already done
     int scalingDone;

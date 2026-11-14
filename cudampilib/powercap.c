@@ -1845,6 +1845,10 @@ void __cudampi__powercappingManagerStep(void) {
     static unsigned long long acc_count = 0ULL;          // windows accumulated since last optimizer step
     static double acc_edp = 0.0;                         // sum of per-window EDP values
     double combinedEnergy = 0.0;
+    // Per-device energy/time accumulators as read in this step; subtracted (not zeroed)
+    // at the end so energy reported by a device while the optimizer runs is kept.
+    double consumedEnergy[__CUDAMPI_MAX_THREAD_COUNT];
+    double consumedEnergyTime[__CUDAMPI_MAX_THREAD_COUNT];
 
     // TODO: Reintroduce stricter EDP sample validation/rejection once this path has settled.
     // log_message(LOG_INFO, "EDP Gradient Optimization: Checking if all devices have completed their last batch.");
@@ -1857,8 +1861,19 @@ void __cudampi__powercappingManagerStep(void) {
         omp_unset_lock(&(__cudampi__devicelocks[i]));
         break;
       }
-      combinedPower += __cudampi__devicePowerConfig[i].currentPower;
-  
+      // Device power = measured energy over all batches finished since the last window,
+      // divided by the time those batches took. Devices synchronize asynchronously, so
+      // that time differs from the manager's window length; averaging to power first
+      // and multiplying by period_sec below charges every device for the same interval.
+      consumedEnergy[i] = __cudampi__windowEnergy[i];
+      consumedEnergyTime[i] = __cudampi__windowEnergyTime[i];
+      if (consumedEnergyTime[i] > 0.0) {
+        combinedPower += consumedEnergy[i] / consumedEnergyTime[i];
+      } else {
+        // No energy sample in this window (measurement failed): fall back to last known power
+        combinedPower += __cudampi__devicePowerConfig[i].currentPower;
+      }
+
       if (__cudampi__timePerDataPoint[i] > 0.0 && isfinite(__cudampi__timePerDataPoint[i])) {
         sumTimePerDataPoint += __cudampi__timePerDataPoint[i];
         sumRecipTimePerDataPoint += 1.0 / __cudampi__timePerDataPoint[i];
@@ -1991,6 +2006,8 @@ void __cudampi__powercappingManagerStep(void) {
       omp_set_lock(&(__cudampi__devicelocks[i]));
       __cudampi__mgr_batches_sent[i] = __cudampi__last_batches_sent[i];
       __cudampi__mgr_data_points_sent[i] = __cudampi__last_data_points_sent[i];
+      __cudampi__windowEnergy[i] -= consumedEnergy[i];
+      __cudampi__windowEnergyTime[i] -= consumedEnergyTime[i];
       omp_unset_lock(&(__cudampi__devicelocks[i]));
     }
   } 
