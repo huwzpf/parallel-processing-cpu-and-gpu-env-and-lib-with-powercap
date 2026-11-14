@@ -1781,7 +1781,7 @@ void __cudampi__applyInitialPowercapsForStrategy(void) {
 void __cudampi__powercappingManagerStep(void) {
   int amimanager;
   double combinedPower = 0.0;
-  unsigned long long combinedDataPoints = 0;
+  double combinedBatches = 0.0; // fractional: truncating to an integer quantizes EDP badly when a window holds few batches
   double sumTimePerDataPoint = 0.0;
   double sumRecipTimePerDataPoint = 0.0; // sum over devices of 1 / t_dp
 
@@ -1896,17 +1896,17 @@ void __cudampi__powercappingManagerStep(void) {
     double estimatedDataPointsD = period_sec * sumRecipTimePerDataPoint;
     if (estimatedDataPointsD < 0.0) estimatedDataPointsD = 0.0;
     if (__cudampi__default_batch_size > 0UL) {
-      combinedDataPoints =  ((unsigned long long) llround(estimatedDataPointsD))/__cudampi__default_batch_size;
+      combinedBatches = estimatedDataPointsD / (double)__cudampi__default_batch_size;
     }
-    if (combinedDataPoints == 0ULL) {
-      log_message(LOG_WARN, "EDP estimated batch denominator is zero (estimated_dp=%.3f). Using 1.", estimatedDataPointsD);
-      combinedDataPoints = 1ULL;
+    if (!(combinedBatches > 0.0) || !isfinite(combinedBatches)) {
+      log_message(LOG_WARN, "EDP estimated batch denominator is not positive (estimated_dp=%.3f). Using 1.", estimatedDataPointsD);
+      combinedBatches = 1.0;
     }
     combinedEnergy = combinedPower * period_sec;
 
     if (combinedEnergy > 0.0 && period_sec > 0.0) {
       __cudampi__edp = (combinedEnergy * period_sec) /
-                        (((double)combinedDataPoints) * ((double)combinedDataPoints));
+                        (combinedBatches * combinedBatches);
     } else {
       __cudampi__edp = 0.0;
     }
@@ -1922,9 +1922,9 @@ void __cudampi__powercappingManagerStep(void) {
         double norm = (maxv > minv) ? (__cudampi__devicePowerConfig[i].currentPowerCap - minv) / (maxv - minv) : 0.0;
         cap_pos += snprintf(cap_str + cap_pos, sizeof(cap_str) - cap_pos, "%s%.4f", i ? "," : "", norm);
       }
-      log_message(LOG_WARN, "[OPTIMIZER STEP] window=%llu interval=%llu phase=%d energy_J=%.3f period_s=%.6f batches=%llu edp=%.8f avg_power=%.3fW cap=%s",
+      log_message(LOG_WARN, "[OPTIMIZER STEP] window=%llu interval=%llu phase=%d energy_J=%.3f period_s=%.6f batches=%.3f edp=%.8f avg_power=%.3fW cap=%s",
                   edp_window_count, __cudampi__optimizer_step_interval, __cudampi__powercapStrategy,
-                  combinedEnergy, period_sec, combinedDataPoints, __cudampi__edp,
+                  combinedEnergy, period_sec, combinedBatches, __cudampi__edp,
                   combinedPower, cap_str);
     }
 

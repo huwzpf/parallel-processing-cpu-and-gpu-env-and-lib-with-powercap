@@ -72,7 +72,7 @@ _OPT_STEP_RE = re.compile(
     r"phase=(?P<phase>-?\d+)\s+"
     r"energy_J=(?P<energy_J>[-\d.eE+]+)\s+"
     r"period_s=(?P<period_s>[-\d.eE+]+)\s+"
-    r"batches=(?P<batches>\d+)\s+"
+    r"batches=(?P<batches>\d+(?:\.\d+)?)\s+"
     r"edp=(?P<edp>[-\d.eE+]+)\s+"
     r"avg_power=(?P<avg_power>[-\d.eE+]+)W\s+"
     r"cap=(?P<cap>[-\d.,eE+]+)"
@@ -118,7 +118,7 @@ def parse_optimizer_steps(log_file: str) -> list[dict]:
                     "phase": int(m.group("phase")),
                     "energy_J": float(m.group("energy_J")),
                     "period_s": float(m.group("period_s")),
-                    "batches": int(m.group("batches")),
+                    "batches": float(m.group("batches")),
                     "edp": float(m.group("edp")),
                     "avg_power": float(m.group("avg_power")),
                     "cap_vector": m.group("cap"),
