@@ -502,9 +502,20 @@ int __cudampi__SelectPowercapEqualEqualShare() {
 // Fills g->delta[0..n-1] with a ±1 Rademacher vector and returns nothing.
 // The vector is reused twice in the SPSA cycle: +eps*delta and -eps*delta.
 //
+// Private generator (xorshift32) rather than rand(): the apps fill their input data
+// from rand() after this library is initialised, so seeding the global stream here
+// would change that data (and the app output) from run to run. Seeded in
+// __cudampi__initializeGradientOpt.
+static unsigned int __cudampi__spsaRngState = 1U;
+
 static void __cudampi__generatePerturbation(spsaGradientOpt_t *g, int i)
 {
-  g->delta[i] = (rand() & 1) ? 1.0 : -1.0;   // uniform +- 1
+  unsigned int x = __cudampi__spsaRngState;
+  x ^= x << 13;
+  x ^= x >> 17;
+  x ^= x << 5;
+  __cudampi__spsaRngState = x;
+  g->delta[i] = (x & 0x10000U) ? 1.0 : -1.0;   // uniform +- 1
 }
 
 //
@@ -1316,6 +1327,14 @@ void __cudampi__initializeGradientOpt (double alpha, double eps) {
   double neps = eps;
   if (neps <= 0.0) neps = 0.02; // default small step in normalized units
   if (neps > 0.5) neps = 0.5;
+
+  // Seed the SPSA perturbation generator from the clock so the +-1 sequence differs
+  // between runs; the seed is logged so a run can be identified.
+  struct timeval seed_time;
+  gettimeofday(&seed_time, NULL);
+  __cudampi__spsaRngState = (unsigned int)seed_time.tv_sec ^ (unsigned int)seed_time.tv_usec;
+  if (__cudampi__spsaRngState == 0U) __cudampi__spsaRngState = 1U;  // xorshift must not start at 0
+  log_message(LOG_INFO, "SPSA perturbation generator seeded with %u", __cudampi__spsaRngState);
 
   __cudampi__simpleGradientOpt.alpha = alpha;
   __cudampi__simpleGradientOpt.eps = neps;
