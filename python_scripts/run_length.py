@@ -20,9 +20,14 @@ and therefore
 
     windows ~= iters * data_size / (batch_size * streams * sync_period * devices)
 
+`devices` is the number of devices sharing one pass over the data. In most apps that
+is all of them. Apps in PIPELINE_APPS run two stages instead: every data point goes
+through a CPU device and then a GPU device, so each stage makes its own pass and the
+stage with more devices (more data per round) sets the window length.
+
 This is an estimate: devices do not run at the same speed. Against measured runs
-(4 nodes, 2 streams) the real window count was 0.87x - 1.47x of it (rnn 0.87-1.3,
-montecarlo GPU-only 0.9, cnn 1.1-1.5), so expect the requested count give or take
+(4 nodes, 2 streams) the real window count was 0.6x - 1.3x of it (rnn 0.87-1.3,
+montecarlo GPU-only 0.9, cnn 0.6-0.97), so expect the requested count give or take
 that much. Pass margin > 1 to iters_for_windows() when the count is a hard minimum.
 
 Usage as a script:
@@ -56,6 +61,10 @@ APP_SYNC_PERIOD = {
     "patternsearch": 2,
 }
 
+# Apps where CPU devices pre-process the data and GPU devices then consume it
+# (app-streams-cnn.c: globalcounter1 for the CPU stage, globalcounter2 for the GPU one).
+PIPELINE_APPS = {"cnn"}
+
 # Multiplier on the computed iters. 1.0 aims at the requested window count; about 1.2
 # makes even the slowest observed case (0.87x of the estimate) reach it.
 DEFAULT_MARGIN = 1.0
@@ -77,11 +86,20 @@ def device_count(number_of_nodes: int, cpu_enabled: bool) -> int:
     return number_of_nodes + (number_of_nodes - 1 if cpu_enabled else 0)
 
 
+def pacing_device_count(app_name: str, number_of_nodes: int, cpu_enabled: bool) -> int:
+    """Devices that share one pass over the data and so set the window length: all
+    devices, or for a pipeline app the larger of its GPU and CPU stages."""
+    if app_name in PIPELINE_APPS and cpu_enabled:
+        gpus = device_count(number_of_nodes, cpu_enabled=False)
+        return max(gpus, device_count(number_of_nodes, cpu_enabled=True) - gpus)
+    return device_count(number_of_nodes, cpu_enabled)
+
+
 def windows_per_iter(app_name: str, batch_size: int, number_of_nodes: int,
                      number_of_streams: int = 2, cpu_enabled: bool = True) -> float:
     """Estimated sync windows produced by one dataset iteration."""
     per_window = (batch_size * number_of_streams * app_sync_period(app_name)
-                  * device_count(number_of_nodes, cpu_enabled))
+                  * pacing_device_count(app_name, number_of_nodes, cpu_enabled))
     return app_data_size(app_name) / per_window
 
 
@@ -106,5 +124,5 @@ if __name__ == "__main__":
     wpi = windows_per_iter(a.app, a.batch_size, a.nodes, a.streams, not a.gpu_only)
     iters = iters_for_windows(a.app, a.batch_size, a.nodes, a.windows, a.streams, not a.gpu_only, a.margin)
     print(f"{a.app}: data_size={app_data_size(a.app)} sync_period={app_sync_period(a.app)} "
-          f"devices={device_count(a.nodes, not a.gpu_only)} -> {wpi:.2f} windows/iter; "
+          f"pacing_devices={pacing_device_count(a.app, a.nodes, not a.gpu_only)} -> {wpi:.2f} windows/iter; "
           f"iters={iters} for ~{a.windows} windows")

@@ -26,10 +26,20 @@ Crash safety: the per-window CSV is appended and flushed after every run, and th
 script resumes by skipping (base_cap, device, eps, sign, rep) cells already
 present in the CSV. Nothing already collected is lost or recomputed.
 
+Run length: each run is sized for steps_at_max_n * n_max sync windows, converted to
+the app's --iters by run_length.iters_for_windows() (same as snr_test.py).
+
+Devices: by default one device of each (type, role) class is perturbed (e.g. master
+GPU, one worker GPU, one worker CPU), since devices of a class are the same hardware
+in the same role. Use --all-devices or --devices to widen that.
+
 Usage:
-    python snr_perturbation_test.py [--app {cnn,rnn}] [--nodes N] [--out-dir DIR]
-        [--base-caps ...] [--epsilons ...] [--n-max 40] [--n-runs 3]
-        [--batch-size 50] [--devices i j ...]
+    python snr_perturbation_test.py [--app {cnn,rnn}] [--nodes N]
+        [--results-dir DIR] [--out-dir STEM]
+        [--base-caps ...] [--epsilons ...] [--n-max 20] [--steps-at-max-n 15]
+        [--n-runs 1] [--batch-size 50] [--devices i j ... | --all-devices]
+
+Output goes to '<results-dir>/<app>_<out-dir>_<nodes>_nodes'.
 
 Columns in perturbation_samples.csv (one row per sync window):
     app, nodes, batch_size, base_cap, perturbed_device, perturbed_type,
@@ -46,20 +56,31 @@ from pathlib import Path
 
 from experiments import single_app_run
 from models import RunParameters
+from run_length import iters_for_windows
 
 
 # ---------------------------------------------------------------------------
-# Run length: identical formula to snr_test.compute_iters. iters is normalized
-# by the app's default batch size so it stays in a reasonable range across batch
-# sizes. CNN and RNN default to 20; the remaining apps default to 240000.
+# Run length: same sizing as snr_test.compute_iters. A run should yield
+# steps_at_max_n optimizer steps at n_max, i.e. steps_at_max_n * n_max sync windows.
 # ---------------------------------------------------------------------------
-DEFAULT_BATCH_SIZES = {"cnn": 50, "rnn": 50}
-DEFAULT_BATCH_SIZE_FALLBACK = 240000
+# 15 steps at N=20 (about 300 windows) is enough to re-bin a run offline up to N=20.
+DEFAULT_STEPS_AT_MAX_N = 15
+NUMBER_OF_STREAMS = 2
 
 
-def compute_iters(n: int, number_od_nodes: int, batch_size: int, app_name: str) -> int:
-    default_bs = DEFAULT_BATCH_SIZES.get(app_name, DEFAULT_BATCH_SIZE_FALLBACK)
-    return int(round(n * number_od_nodes * batch_size / default_bs))
+def compute_iters(n_max: int, number_od_nodes: int, batch_size: int, app_name: str,
+                  steps_at_max_n: int = DEFAULT_STEPS_AT_MAX_N,
+                  cpu_enabled: bool = True) -> int:
+    return iters_for_windows(app_name, batch_size, number_od_nodes, steps_at_max_n * n_max,
+                             number_of_streams=NUMBER_OF_STREAMS, cpu_enabled=cpu_enabled)
+
+
+def representative_devices(topo: dict) -> list[int]:
+    """Lowest device index of each (type, role) class in the topology."""
+    seen = {}
+    for idx in sorted(topo):
+        seen.setdefault((topo[idx]["type"], topo[idx]["role"]), idx)
+    return sorted(seen.values())
 
 
 # ---------------------------------------------------------------------------
@@ -195,7 +216,7 @@ def _make_params(app_name, batch_size, nodes, n_max, iters,
     return RunParameters(
         app_name=app_name,
         cpu_enabled=cpu_enabled,
-        number_of_streams=2,
+        number_of_streams=NUMBER_OF_STREAMS,
         number_od_nodes=nodes,
         batch_size=batch_size,
         strategy="EQUAL_SPLIT_EDP_MONITOR",
@@ -359,7 +380,7 @@ def rebuild_csv_from_logs(app_name, batch_size, nodes, out_dir):
                 skipped += 1
                 continue
             n_max = steps[0]["interval"]
-            iters = compute_iters(n_max, nodes, batch_size, app_name)
+            iters = ""  # the iters a run was launched with are not recorded in its log
             base_meta = {
                 "app": app_name, "nodes": nodes, "batch_size": batch_size,
                 "n_max": n_max, "iters": iters, **meta,
@@ -392,16 +413,23 @@ def run_perturbation_experiments(
     out_dir: str,
     devices: list[int] | None = None,
     cpu_enabled: bool = True,
+    steps_at_max_n: int = DEFAULT_STEPS_AT_MAX_N,
+    all_devices: bool = False,
 ):
+    """devices=None perturbs one device per (type, role) class, or every device when
+    all_devices is set; an explicit devices list wins over both."""
     out_dir = os.path.abspath(out_dir)
     Path(out_dir).mkdir(parents=True, exist_ok=True)
-    iters = compute_iters(n_max, nodes, batch_size, app_name)
+    iters = compute_iters(n_max, nodes, batch_size, app_name, steps_at_max_n,
+                          cpu_enabled=cpu_enabled)
     csv_path = os.path.join(out_dir, "perturbation_samples.csv")
 
     num_devices, _topo = discover_devices(
         app_name, batch_size, nodes, n_max, iters, out_dir, cpu_enabled=cpu_enabled)
     if devices is None:
-        devices = list(range(num_devices))
+        devices = list(range(num_devices)) if all_devices else representative_devices(_topo)
+        print(f"[perturb] Perturbing devices {devices} "
+              f"({'all' if all_devices else 'one per type/role class'})")
     else:
         devices = [d for d in devices if 0 <= d < num_devices]
 
@@ -499,23 +527,34 @@ if __name__ == "__main__":
     parser.add_argument(
         "--app",
         choices=["cnn", "rnn", "collatz", "montecarlo", "twinprime", "vecmaxdiv"],
-        default="montecarlo")
+        default="rnn")
     parser.add_argument("--nodes", type=int, default=4,
                         help="Number of nodes in the cluster run")
-    parser.add_argument("--out-dir", default="montecarlo_gpu_snr_perturbation_results")
-    parser.add_argument("--batch-size", type=int, default=240000)
+    parser.add_argument("--results-dir", default=".",
+                        help="Directory that experiment output goes into "
+                             "(default: the current directory)")
+    parser.add_argument("--out-dir", default="snr_perturbation_results",
+                        help="Experiments: name stem; output goes to "
+                             "'<results-dir>/<app>_<out-dir>_<nodes>_nodes'. "
+                             "--rebuild-csv: path of that directory")
+    parser.add_argument("--batch-size", type=int, default=50)
     parser.add_argument("--base-caps", nargs="+", type=float,
-                        default=[0.2, 0.5, 0.8])
+                        default=[0.4, 0.6])
     parser.add_argument("--epsilons", nargs="+", type=float,
                         default=[0.05, 0.1, 0.2])
     parser.add_argument("--n-max", type=int, default=20,
-                        help="Highest N (optimizer_step_interval); run length is "
-                             "iters=compute_iters(n_max,...). Lower N is derived "
+                        help="Highest N (optimizer_step_interval). Lower N is derived "
                              "offline from the per-window logs.")
+    parser.add_argument("--steps-at-max-n", type=int, default=DEFAULT_STEPS_AT_MAX_N,
+                        help="Optimizer steps (EDP estimates) wanted at --n-max; each run "
+                             "is sized for steps * n_max sync windows")
     parser.add_argument("--n-runs", type=int, default=1,
                         help="Repetitions per (cap, device, eps, sign) cell")
     parser.add_argument("--devices", nargs="+", type=int, default=None,
-                        help="Device indices to perturb (default: all discovered)")
+                        help="Device indices to perturb (default: one device of each "
+                             "type/role class, e.g. master GPU, a worker GPU, a worker CPU)")
+    parser.add_argument("--all-devices", action="store_true",
+                        help="Perturb every discovered device instead of one per class")
     parser.add_argument("--gpu-only", action="store_true",
                         help="Disable CPU devices (perturb GPUs only). Works with "
                              "a single master node holding many GPUs (--nodes 1).")
@@ -543,7 +582,10 @@ if __name__ == "__main__":
         epsilons=args.epsilons,
         n_max=args.n_max,
         n_runs=args.n_runs,
-        out_dir=args.out_dir,
+        out_dir=os.path.join(os.path.abspath(args.results_dir),
+                             f"{args.app}_{args.out_dir}_{args.nodes}_nodes"),
         devices=args.devices,
         cpu_enabled=not args.gpu_only,
+        steps_at_max_n=args.steps_at_max_n,
+        all_devices=args.all_devices,
     )
